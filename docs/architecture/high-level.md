@@ -17,9 +17,8 @@ sequenceDiagram
     note over s: Server exposes sshd to relay via SSH -R
 
     c ->> c : SSH over TLS (local port forwarding)
-    note over c: Client maps local ports to server services
-
-    c <<-->> s : Bidirectional data exchange over SSH tunnel
+    note over c: Client can maps local ports to allowed server services
+    c <<-->> s : Data exchange over SSH tunnel (Bidirectional is possible)
 
 ```
 
