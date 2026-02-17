@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	gossh "golang.org/x/crypto/ssh"
 )
@@ -115,7 +117,8 @@ func (s *Server) loadOrGenerateHostKey() error {
 	return nil
 }
 
-// Run starts the SSH server (blocking).
+// Run starts the SSH server (blocking). It survives transient accept errors
+// and individual connection failures without stopping.
 func (s *Server) Run() error {
 	addr := fmt.Sprintf(":%d", s.Port)
 	lis, err := net.Listen("tcp", addr)
@@ -129,14 +132,34 @@ func (s *Server) Run() error {
 	for {
 		conn, err := lis.Accept()
 		if err != nil {
-			return fmt.Errorf("ssh-server: accept: %w", err)
+			// If the listener was closed (Stop was called), exit cleanly.
+			if errors.Is(err, net.ErrClosed) {
+				log.Println("ssh-server: listener closed, shutting down")
+				return nil
+			}
+			// Transient error — log and keep accepting.
+			log.Printf("ssh-server: accept error (continuing): %v", err)
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
+
+		// Enable TCP keepalive to detect dead connections.
+		if tc, ok := conn.(*net.TCPConn); ok {
+			tc.SetKeepAlive(true)
+			tc.SetKeepAlivePeriod(30 * time.Second)
+		}
+
 		go s.handleConnection(conn)
 	}
 }
 
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("ssh-server: panic in connection handler: %v", r)
+		}
+	}()
 
 	sshConn, chans, reqs, err := gossh.NewServerConn(conn, s.config)
 	if err != nil {
@@ -157,6 +180,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 			newChan.Reject(gossh.UnknownChannelType, fmt.Sprintf("unsupported channel type: %s", newChan.ChannelType()))
 		}
 	}
+
+	log.Printf("ssh-server: connection closed from %s", sshConn.RemoteAddr())
 }
 
 // directTCPIPData matches the RFC 4254 §7.2 payload for direct-tcpip channels.
@@ -195,6 +220,12 @@ func parseDirectTCPIP(data []byte) (directTCPIPData, error) {
 }
 
 func (s *Server) handleDirectTCPIP(newChan gossh.NewChannel) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("ssh-server: panic in direct-tcpip handler: %v", r)
+		}
+	}()
+
 	d, err := parseDirectTCPIP(newChan.ExtraData())
 	if err != nil {
 		newChan.Reject(gossh.ConnectionFailed, fmt.Sprintf("invalid direct-tcpip data: %v", err))
@@ -204,12 +235,18 @@ func (s *Server) handleDirectTCPIP(newChan gossh.NewChannel) {
 	dest := net.JoinHostPort(d.DestHost, fmt.Sprintf("%d", d.DestPort))
 	log.Printf("ssh-server: direct-tcpip %s:%d → %s", d.OriginHost, d.OriginPort, dest)
 
-	conn, err := net.Dial("tcp", dest)
+	conn, err := net.DialTimeout("tcp", dest, 10*time.Second)
 	if err != nil {
 		newChan.Reject(gossh.ConnectionFailed, fmt.Sprintf("dial %s: %v", dest, err))
 		return
 	}
 	defer conn.Close()
+
+	// Enable TCP keepalive on the forwarded connection too.
+	if tc, ok := conn.(*net.TCPConn); ok {
+		tc.SetKeepAlive(true)
+		tc.SetKeepAlivePeriod(30 * time.Second)
+	}
 
 	ch, _, err := newChan.Accept()
 	if err != nil {
@@ -224,11 +261,16 @@ func (s *Server) handleDirectTCPIP(newChan gossh.NewChannel) {
 	go func() {
 		defer wg.Done()
 		io.Copy(conn, ch)
+		// Half-close: signal the TCP side we're done writing.
+		if tc, ok := conn.(*net.TCPConn); ok {
+			tc.CloseWrite()
+		}
 	}()
 
 	go func() {
 		defer wg.Done()
 		io.Copy(ch, conn)
+		ch.CloseWrite()
 	}()
 
 	wg.Wait()
