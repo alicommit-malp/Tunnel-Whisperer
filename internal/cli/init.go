@@ -6,11 +6,13 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/tunnelwhisperer/tw/internal/api"
 	"github.com/tunnelwhisperer/tw/internal/config"
 	"github.com/tunnelwhisperer/tw/internal/core"
 	twssh "github.com/tunnelwhisperer/tw/internal/ssh"
+	twxray "github.com/tunnelwhisperer/tw/internal/xray"
 )
 
 var asServer bool
@@ -117,6 +119,52 @@ func runInit(cmd *cobra.Command, args []string) error {
 			fmt.Printf("SSH server error: %v\n", err)
 		}
 	}()
+
+	// Start Xray tunnel if enabled.
+	if cfg.Xray.Enabled {
+		if cfg.Xray.UUID == "" {
+			cfg.Xray.UUID = uuid.New().String()
+			if err := config.Save(cfg); err != nil {
+				fmt.Printf("Warning: could not save generated UUID: %v\n", err)
+			} else {
+				fmt.Printf("Generated Xray UUID: %s\n", cfg.Xray.UUID)
+			}
+		}
+
+		xrayInstance, err := twxray.New(cfg.Xray, cfg.SSH.Port)
+		if err != nil {
+			return fmt.Errorf("initializing Xray: %w", err)
+		}
+		if err := xrayInstance.Start(cfg.SSH.Port); err != nil {
+			return fmt.Errorf("starting Xray: %w", err)
+		}
+		defer xrayInstance.Close()
+		fmt.Printf("Xray tunnel active → %s:%d%s\n", cfg.Xray.RelayHost, cfg.Xray.RelayPort, cfg.Xray.Path)
+
+		// Determine Xray local listen port for the SSH reverse tunnel.
+		xrayListenPort := cfg.Xray.ListenPort
+		if xrayListenPort == 0 {
+			xrayListenPort = cfg.SSH.Port + 1
+		}
+
+		// Start SSH reverse tunnel through Xray to the relay.
+		privPath := filepath.Join(config.Dir(), "id_ed25519")
+		rt := &twssh.ReverseTunnel{
+			RemoteAddr: fmt.Sprintf("127.0.0.1:%d", xrayListenPort),
+			User:       cfg.Xray.RelaySSHUser,
+			KeyPath:    privPath,
+			RemotePort: cfg.Xray.RemotePort,
+			LocalAddr:  fmt.Sprintf("127.0.0.1:%d", cfg.SSH.Port),
+		}
+		go func() {
+			fmt.Printf("Reverse tunnel: relay :%d → local :%d (via Xray :%d)\n",
+				cfg.Xray.RemotePort, cfg.SSH.Port, xrayListenPort)
+			if err := rt.Run(); err != nil {
+				fmt.Printf("Reverse tunnel error: %v\n", err)
+			}
+		}()
+		defer rt.Stop()
+	}
 
 	// Start gRPC API server (blocking).
 	apiAddr := fmt.Sprintf(":%d", cfg.API.Port)

@@ -15,6 +15,7 @@ type Config struct {
 	API       APIConfig       `yaml:"api"`
 	Dashboard DashboardConfig `yaml:"dashboard"`
 	Relay     RelayConfig     `yaml:"relay"`
+	Xray      XrayConfig      `yaml:"xray"`
 }
 
 type SSHConfig struct {
@@ -37,6 +38,18 @@ type RelayConfig struct {
 	Region   string `yaml:"region"`
 }
 
+type XrayConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	UUID         string `yaml:"uuid"`
+	RelayHost    string `yaml:"relay_host"`
+	RelayPort    int    `yaml:"relay_port"`
+	Path         string `yaml:"path"`
+	ListenPort   int    `yaml:"listen_port"`
+	RelaySSHPort int    `yaml:"relay_ssh_port"`
+	RelaySSHUser string `yaml:"relay_ssh_user"`
+	RemotePort   int    `yaml:"remote_port"`
+}
+
 // Default returns the default configuration.
 func Default() *Config {
 	return &Config{
@@ -53,6 +66,14 @@ func Default() *Config {
 		},
 		Relay: RelayConfig{
 			Provider: "aws",
+		},
+		Xray: XrayConfig{
+			Enabled:      false,
+			RelayPort:    443,
+			Path:         "/tw",
+			RelaySSHPort: 22,
+			RelaySSHUser: "ubuntu",
+			RemotePort:   2222,
 		},
 	}
 }
