@@ -1,16 +1,18 @@
-BINARY := tw
-CMD    := ./cmd/tw
+BINARY  := tw
+CMD     := ./cmd/tw
+BIN_DIR := bin
 
 .PHONY: build run clean proto
 
 build:
-	go build -o $(BINARY) $(CMD)
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/$(BINARY) $(CMD)
 
 run: build
-	./$(BINARY)
+	./$(BIN_DIR)/$(BINARY)
 
 clean:
-	rm -f $(BINARY)
+	rm -rf $(BIN_DIR)
 
 proto:
 	protoc \

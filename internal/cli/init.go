@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/tunnelwhisperer/tw/internal/api"
+	"github.com/tunnelwhisperer/tw/internal/config"
 	"github.com/tunnelwhisperer/tw/internal/core"
 	twssh "github.com/tunnelwhisperer/tw/internal/ssh"
 )
@@ -32,19 +33,26 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("Initializing Tunnel Whisperer server...")
 
+	// Load configuration.
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	fmt.Printf("Config: %s\n", config.FilePath())
+
 	// Ensure config directory exists.
-	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+	if err := os.MkdirAll(config.Dir(), 0755); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 
-	// Generate SSH key pair.
-	privPath := filepath.Join(cfgDir, "id_ed25519")
-	pubPath := filepath.Join(cfgDir, "id_ed25519.pub")
+	// Generate SSH client key pair (used to connect to relay).
+	privPath := filepath.Join(config.Dir(), "id_ed25519")
+	pubPath := filepath.Join(config.Dir(), "id_ed25519.pub")
 
 	if _, err := os.Stat(privPath); err == nil {
-		fmt.Println("SSH key pair already exists, skipping generation.")
+		fmt.Println("SSH client key pair already exists, skipping generation.")
 	} else {
-		fmt.Println("Generating ed25519 SSH key pair...")
+		fmt.Println("Generating ed25519 SSH client key pair...")
 		privPEM, pubAuthorized, err := twssh.GenerateKeyPair()
 		if err != nil {
 			return fmt.Errorf("generating SSH key pair: %w", err)
@@ -55,16 +63,35 @@ func runInit(cmd *cobra.Command, args []string) error {
 		if err := os.WriteFile(pubPath, pubAuthorized, 0644); err != nil {
 			return fmt.Errorf("writing public key: %w", err)
 		}
-		fmt.Printf("Keys written to %s\n", cfgDir)
+		fmt.Printf("Client keys written to %s\n", config.Dir())
+
+		// Seed authorized_keys with the generated public key so the
+		// server's own client key is trusted by the embedded SSH server.
+		akPath := cfg.SSH.AuthorizedKeys
+		if _, err := os.Stat(akPath); os.IsNotExist(err) {
+			if err := os.WriteFile(akPath, pubAuthorized, 0600); err != nil {
+				return fmt.Errorf("writing authorized_keys: %w", err)
+			}
+			fmt.Printf("authorized_keys seeded at %s\n", akPath)
+		}
+	}
+
+	// Save default config if none exists.
+	if _, err := os.Stat(config.FilePath()); os.IsNotExist(err) {
+		if err := config.Save(cfg); err != nil {
+			fmt.Printf("Warning: could not save default config: %v\n", err)
+		} else {
+			fmt.Printf("Default config written to %s\n", config.FilePath())
+		}
 	}
 
 	// Initialize core service.
-	svc := core.New(cfgDir)
+	svc := core.New(config.Dir())
 	if err := svc.Init(); err != nil {
 		return fmt.Errorf("initializing core service: %w", err)
 	}
 
-	// Print service install instructions (actual install is platform-specific and deferred).
+	// Print service install instructions.
 	switch runtime.GOOS {
 	case "linux":
 		fmt.Println("\nTo install as a systemd service:")
@@ -79,8 +106,21 @@ func runInit(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\nService installation for %s is not yet supported.\n", runtime.GOOS)
 	}
 
-	// Start gRPC API server.
-	fmt.Println("\nStarting gRPC API server on :50051...")
-	apiServer := api.NewServer(svc, ":50051")
+	// Start SSH server.
+	sshServer, err := twssh.NewServer(cfg.SSH.Port, cfg.SSH.HostKeyDir, cfg.SSH.AuthorizedKeys)
+	if err != nil {
+		return fmt.Errorf("initializing SSH server: %w", err)
+	}
+	go func() {
+		fmt.Printf("\nStarting SSH server on :%d...\n", cfg.SSH.Port)
+		if err := sshServer.Run(); err != nil {
+			fmt.Printf("SSH server error: %v\n", err)
+		}
+	}()
+
+	// Start gRPC API server (blocking).
+	apiAddr := fmt.Sprintf(":%d", cfg.API.Port)
+	fmt.Printf("Starting gRPC API server on %s...\n", apiAddr)
+	apiServer := api.NewServer(svc, apiAddr)
 	return apiServer.Run()
 }

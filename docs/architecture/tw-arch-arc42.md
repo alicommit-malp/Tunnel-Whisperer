@@ -60,6 +60,7 @@ graph LR
 | HTTP | 80 | External → Relay | ACME challenge for certificate issuance |
 | SSH | 22 | Server → Relay | Initial relay provisioning and config management |
 | SSH (over Xray) | — | End-to-end | Reverse port forwarding and session security |
+| SSH (embedded) | 2222 | Local | Server's embedded SSH server (Go `x/crypto/ssh`), reverse-forwarded to relay |
 | gRPC | 50051 | Local | Server API for dashboard and tooling |
 
 ---
@@ -84,10 +85,20 @@ graph LR
 
 #### Server
 
-`tw` is a Go binary released for both Windows and Linux. The server brings up two internal services:
+`tw` is a Go binary released for both Windows and Linux. The server brings up three internal services:
 
 * **Core Service** — runs all commands (relay provisioning, key generation, tunnel management)
 * **API Service** — a gRPC service that exposes core service operations
+* **SSH Server** — an embedded SSH server (Go `golang.org/x/crypto/ssh`) that listens on a configurable port and is reverse-forwarded to the relay for client access
+
+All settings are stored in a YAML configuration file:
+
+| Platform | Config path |
+| -------- | ----------- |
+| Linux | `/etc/tw/config/config.yaml` |
+| Windows | `C:\ProgramData\tw\config\config.yaml` |
+
+Override with the `TW_CONFIG_DIR` environment variable.
 
 #### Relay
 
@@ -112,6 +123,7 @@ tw/
 │   └── tw/                      # binary entry point
 ├── internal/
 │   ├── cli/                     # cobra commands (init, dashboard, connect)
+│   ├── config/                  # YAML config loading, platform-specific paths
 │   ├── core/                    # core service — orchestrates all operations
 │   ├── api/                     # gRPC API service
 │   ├── provider/                # cloud provider interface + implementations
@@ -119,7 +131,7 @@ tw/
 │   ├── relay/                   # relay config generation
 │   │   ├── caddy/               # Caddyfile templating
 │   │   └── xray/                # Xray config templating
-│   ├── ssh/                     # SSH key management & tunneling
+│   ├── ssh/                     # SSH key generation, embedded server & client
 │   ├── auth/                    # OAuth provider & JWT validation
 │   ├── tunnel/                  # tunnel lifecycle (server & client side)
 │   └── dashboard/               # HTTP server serving embedded web UI
@@ -209,7 +221,25 @@ sequenceDiagram
 
 ## 7. Deployment View
 
-### 7.1 Linux
+### 7.1 Configuration
+
+Default `config.yaml`:
+
+```yaml
+ssh:
+  port: 2222
+  host_key_dir: /etc/tw/config   # or C:\ProgramData\tw\config on Windows
+api:
+  port: 50051
+dashboard:
+  port: 8080
+relay:
+  provider: aws
+  domain: ""
+  region: ""
+```
+
+### 7.2 Linux
 
 ```bash
 # install as a systemd service, enable, and start it
@@ -219,7 +249,7 @@ tw init --as-server
 tw dashboard
 ```
 
-### 7.2 Windows
+### 7.3 Windows
 
 ```powershell
 # install as a Windows service, set to automatic, and start it
@@ -228,3 +258,11 @@ tw.exe init --as-server
 # bring up the dashboard UI (calls the API service)
 tw dashboard
 ```
+
+### 7.4 What `init --as-server` Starts
+
+1. Loads (or creates) `config.yaml` from the platform config directory
+2. Generates an ed25519 SSH client key pair (`id_ed25519` / `id_ed25519.pub`) for relay access
+3. Generates an ed25519 host key (`ssh_host_ed25519_key`) for the embedded SSH server
+4. Starts the **embedded SSH server** on the configured port (default `:2222`)
+5. Starts the **gRPC API server** on the configured port (default `:50051`)
