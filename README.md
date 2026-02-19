@@ -57,6 +57,33 @@ In modern enterprise environments (Healthcare, Manufacturing, Finance), "getting
 
 ---
 
+## Building
+
+Requires **Go 1.22+**.
+
+```bash
+# Linux (native or cross-compile)
+make build-linux        # → bin/tw
+
+# Windows (cross-compile from Linux)
+make build-windows      # → bin/tw.exe
+
+# Both platforms
+make build-all
+```
+
+Or build directly with `go build`:
+
+```bash
+# Linux
+GOTOOLCHAIN=local GOOS=linux GOARCH=amd64 go build -o bin/tw ./cmd/tw
+
+# Windows
+GOTOOLCHAIN=local GOOS=windows GOARCH=amd64 go build -o bin/tw.exe ./cmd/tw
+```
+
+---
+
 ## Architecture
 
 Tunnel Whisperer combines the reliability of **OpenSSH** with the resilience of **V2Ray (VMess/VLESS)** transport.

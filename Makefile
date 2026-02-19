@@ -2,11 +2,23 @@ BINARY  := tw
 CMD     := ./cmd/tw
 BIN_DIR := bin
 
-.PHONY: build run clean proto
+export GOTOOLCHAIN := local
+
+.PHONY: build build-linux build-windows build-all run clean proto
 
 build:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/$(BINARY) $(CMD)
+
+build-linux:
+	@mkdir -p $(BIN_DIR)
+	GOOS=linux GOARCH=amd64 go build -o $(BIN_DIR)/$(BINARY) $(CMD)
+
+build-windows:
+	@mkdir -p $(BIN_DIR)
+	GOOS=windows GOARCH=amd64 go build -o $(BIN_DIR)/$(BINARY).exe $(CMD)
+
+build-all: build-linux build-windows
 
 run: build
 	./$(BIN_DIR)/$(BINARY)

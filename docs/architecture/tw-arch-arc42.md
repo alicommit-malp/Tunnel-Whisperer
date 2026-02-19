@@ -226,29 +226,54 @@ sequenceDiagram
 Default `config.yaml`:
 
 ```yaml
-ssh:
-  port: 2222
-  host_key_dir: /etc/tw/config   # or C:\ProgramData\tw\config on Windows
-api:
-  port: 50051
-dashboard:
-  port: 8080
-relay:
-  provider: aws
-  domain: ""
-  region: ""
 xray:
-  enabled: false
   uuid: ""                       # auto-generated on first run
-  relay_host: ""                 # e.g. shadow.mint-tunnel.com
+  relay_host: ""                 # e.g. shadow.example.com
   relay_port: 443
   path: /tw
+
+server:                          # only needed for `tw serve`
+  ssh_port: 2222
+  api_port: 50051
+  dashboard_port: 8080
   relay_ssh_port: 22
   relay_ssh_user: ubuntu
   remote_port: 2222              # port exposed on relay for clients
+
+client:                          # only needed for `tw connect`
+  ssh_user: tunnel
+  local_port: 53389              # expose on client localhost
+  remote_host: localhost         # target from server's perspective
+  remote_port: 3389              # target port on server (e.g. RDP)
+  server_ssh_port: 2222          # server's SSH port on relay
 ```
 
-### 7.2 Linux
+### 7.2 Building
+
+Requires **Go 1.22+**.
+
+```bash
+# Linux
+make build-linux        # → bin/tw
+
+# Windows (cross-compile from Linux)
+make build-windows      # → bin/tw.exe
+
+# Both platforms
+make build-all
+```
+
+Direct `go build`:
+
+```bash
+# Linux
+GOTOOLCHAIN=local GOOS=linux GOARCH=amd64 go build -o bin/tw ./cmd/tw
+
+# Windows
+GOTOOLCHAIN=local GOOS=windows GOARCH=amd64 go build -o bin/tw.exe ./cmd/tw
+```
+
+### 7.3 Linux
 
 ```bash
 # install as a systemd service, enable, and start it
@@ -258,7 +283,7 @@ tw serve
 tw dashboard
 ```
 
-### 7.3 Windows
+### 7.4 Windows
 
 ```powershell
 # install as a Windows service, set to automatic, and start it
@@ -268,7 +293,7 @@ tw.exe serve
 tw dashboard
 ```
 
-### 7.4 What `tw serve` Starts
+### 7.5 What `tw serve` Starts
 
 1. Loads (or creates) `config.yaml` from the platform config directory
 2. Generates an ed25519 SSH key pair (`id_ed25519` / `id_ed25519.pub`) if missing

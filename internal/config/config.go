@@ -11,87 +11,59 @@ import (
 
 // Config holds all Tunnel Whisperer settings.
 type Config struct {
-	SSH       SSHConfig       `yaml:"ssh"`
-	API       APIConfig       `yaml:"api"`
-	Dashboard DashboardConfig `yaml:"dashboard"`
-	Relay     RelayConfig     `yaml:"relay"`
-	Xray      XrayConfig      `yaml:"xray"`
-	Client    ClientConfig    `yaml:"client"`
+	Xray   XrayConfig   `yaml:"xray"`
+	Server ServerConfig `yaml:"server"`
+	Client ClientConfig `yaml:"client"`
 }
 
-type SSHConfig struct {
-	Port           int    `yaml:"port"`
-	HostKeyDir     string `yaml:"host_key_dir"`
-	AuthorizedKeys string `yaml:"authorized_keys"`
-}
-
-type APIConfig struct {
-	Port int `yaml:"port"`
-}
-
-type DashboardConfig struct {
-	Port int `yaml:"port"`
-}
-
-type RelayConfig struct {
-	Provider string `yaml:"provider"`
-	Domain   string `yaml:"domain"`
-	Region   string `yaml:"region"`
-}
-
+// XrayConfig is the shared transport layer (both server and client).
 type XrayConfig struct {
-	Enabled      bool   `yaml:"enabled"`
-	UUID         string `yaml:"uuid"`
-	RelayHost    string `yaml:"relay_host"`
-	RelayPort    int    `yaml:"relay_port"`
-	Path         string `yaml:"path"`
-	ListenPort   int    `yaml:"listen_port"`
+	UUID      string `yaml:"uuid"`
+	RelayHost string `yaml:"relay_host"`
+	RelayPort int    `yaml:"relay_port"`
+	Path      string `yaml:"path"`
+}
+
+// ServerConfig holds settings only used by `tw serve`.
+type ServerConfig struct {
+	SSHPort      int    `yaml:"ssh_port"`
+	APIPort      int    `yaml:"api_port"`
+	DashboardPort int   `yaml:"dashboard_port"`
 	RelaySSHPort int    `yaml:"relay_ssh_port"`
 	RelaySSHUser string `yaml:"relay_ssh_user"`
 	RemotePort   int    `yaml:"remote_port"`
 }
 
+// ClientConfig holds settings only used by `tw connect`.
 type ClientConfig struct {
-	SSHUser        string `yaml:"ssh_user"`
-	LocalPort      int    `yaml:"local_port"`
-	RemoteHost     string `yaml:"remote_host"`
-	RemotePort     int    `yaml:"remote_port"`
-	XrayListenPort int    `yaml:"xray_listen_port"`
-	ServerSSHPort  int    `yaml:"server_ssh_port"`
+	SSHUser       string `yaml:"ssh_user"`
+	LocalPort     int    `yaml:"local_port"`
+	RemoteHost    string `yaml:"remote_host"`
+	RemotePort    int    `yaml:"remote_port"`
+	ServerSSHPort int    `yaml:"server_ssh_port"`
 }
 
 // Default returns the default configuration.
 func Default() *Config {
 	return &Config{
-		SSH: SSHConfig{
-			Port:           2222,
-			HostKeyDir:     Dir(),
-			AuthorizedKeys: filepath.Join(Dir(), "authorized_keys"),
-		},
-		API: APIConfig{
-			Port: 50051,
-		},
-		Dashboard: DashboardConfig{
-			Port: 8080,
-		},
-		Relay: RelayConfig{
-			Provider: "aws",
-		},
 		Xray: XrayConfig{
-			Enabled:      false,
-			RelayPort:    443,
-			Path:         "/tw",
+			RelayPort: 443,
+			Path:      "/tw",
+		},
+		Server: ServerConfig{
+			SSHPort:      2222,
+			APIPort:      50051,
+			DashboardPort: 8080,
 			RelaySSHPort: 22,
 			RelaySSHUser: "ubuntu",
 			RemotePort:   2222,
 		},
 		Client: ClientConfig{
-			SSHUser:        "tunnel",
-			LocalPort:      53389,
-			RemoteHost:     "localhost",
-			RemotePort:     3389,
-			XrayListenPort: 54001,
-			ServerSSHPort:  2222,
+			SSHUser:       "tunnel",
+			LocalPort:     53389,
+			RemoteHost:    "localhost",
+			RemotePort:    3389,
+			ServerSSHPort: 2222,
 		},
 	}
 }
@@ -115,6 +87,16 @@ func Dir() string {
 // FilePath returns the full path to the config file.
 func FilePath() string {
 	return filepath.Join(Dir(), "config.yaml")
+}
+
+// HostKeyDir returns the directory for SSH host keys (same as config dir).
+func HostKeyDir() string {
+	return Dir()
+}
+
+// AuthorizedKeysPath returns the path to the authorized_keys file.
+func AuthorizedKeysPath() string {
+	return filepath.Join(Dir(), "authorized_keys")
 }
 
 // Load reads the YAML config file from the platform-specific path.

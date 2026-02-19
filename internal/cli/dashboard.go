@@ -27,7 +27,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	port := cfg.Dashboard.Port
+	port := cfg.Server.DashboardPort
 	if dashboardPort != 0 {
 		port = dashboardPort
 	}

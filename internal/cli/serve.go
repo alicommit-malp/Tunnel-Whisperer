@@ -46,19 +46,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start SSH server.
-	sshServer, err := twssh.NewServer(cfg.SSH.Port, cfg.SSH.HostKeyDir, cfg.SSH.AuthorizedKeys)
+	sshServer, err := twssh.NewServer(cfg.Server.SSHPort, config.HostKeyDir(), config.AuthorizedKeysPath())
 	if err != nil {
 		return fmt.Errorf("initializing SSH server: %w", err)
 	}
 	go func() {
-		fmt.Printf("SSH server on :%d\n", cfg.SSH.Port)
+		fmt.Printf("SSH server on :%d\n", cfg.Server.SSHPort)
 		if err := sshServer.Run(); err != nil {
 			fmt.Printf("SSH server error: %v\n", err)
 		}
 	}()
 
-	// Start Xray tunnel if enabled.
-	if cfg.Xray.Enabled {
+	// Start Xray tunnel if relay_host is configured.
+	if cfg.Xray.RelayHost != "" {
 		if cfg.Xray.UUID == "" {
 			cfg.Xray.UUID = uuid.New().String()
 			if err := config.Save(cfg); err != nil {
@@ -68,34 +68,31 @@ func runServe(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		xrayInstance, err := twxray.New(cfg.Xray, cfg.SSH.Port)
+		xrayInstance, err := twxray.New(cfg.Xray)
 		if err != nil {
 			return fmt.Errorf("initializing Xray: %w", err)
 		}
-		if err := xrayInstance.Start(cfg.SSH.Port); err != nil {
+		if err := xrayInstance.Start(cfg.Server.SSHPort, cfg.Server.RelaySSHPort); err != nil {
 			return fmt.Errorf("starting Xray: %w", err)
 		}
 		defer xrayInstance.Close()
 		fmt.Printf("Xray tunnel active → %s:%d%s\n", cfg.Xray.RelayHost, cfg.Xray.RelayPort, cfg.Xray.Path)
 
-		// Determine Xray local listen port for the SSH reverse tunnel.
-		xrayListenPort := cfg.Xray.ListenPort
-		if xrayListenPort == 0 {
-			xrayListenPort = cfg.SSH.Port + 1
-		}
+		// Xray local listen port is sshPort + 1.
+		xrayListenPort := cfg.Server.SSHPort + 1
 
 		// Start SSH reverse tunnel through Xray to the relay.
 		privPath := filepath.Join(config.Dir(), "id_ed25519")
 		rt := &twssh.ReverseTunnel{
 			RemoteAddr: fmt.Sprintf("127.0.0.1:%d", xrayListenPort),
-			User:       cfg.Xray.RelaySSHUser,
+			User:       cfg.Server.RelaySSHUser,
 			KeyPath:    privPath,
-			RemotePort: cfg.Xray.RemotePort,
-			LocalAddr:  fmt.Sprintf("127.0.0.1:%d", cfg.SSH.Port),
+			RemotePort: cfg.Server.RemotePort,
+			LocalAddr:  fmt.Sprintf("127.0.0.1:%d", cfg.Server.SSHPort),
 		}
 		go func() {
 			fmt.Printf("Reverse tunnel: relay :%d → local :%d (via Xray :%d)\n",
-				cfg.Xray.RemotePort, cfg.SSH.Port, xrayListenPort)
+				cfg.Server.RemotePort, cfg.Server.SSHPort, xrayListenPort)
 			if err := rt.Run(); err != nil {
 				fmt.Printf("Reverse tunnel error: %v\n", err)
 			}
@@ -104,7 +101,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start gRPC API server (blocking).
-	apiAddr := fmt.Sprintf(":%d", cfg.API.Port)
+	apiAddr := fmt.Sprintf(":%d", cfg.Server.APIPort)
 	fmt.Printf("gRPC API on %s\n", apiAddr)
 	apiServer := api.NewServer(svc, apiAddr)
 	return apiServer.Run()
@@ -137,7 +134,7 @@ func ensureKeys(cfg *config.Config) error {
 	fmt.Printf("Keys written to %s\n", config.Dir())
 
 	// Seed authorized_keys with the generated public key.
-	akPath := cfg.SSH.AuthorizedKeys
+	akPath := config.AuthorizedKeysPath()
 	if _, err := os.Stat(akPath); os.IsNotExist(err) {
 		if err := os.WriteFile(akPath, pubAuthorized, 0600); err != nil {
 			return fmt.Errorf("writing authorized_keys: %w", err)

@@ -35,8 +35,8 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if !cfg.Xray.Enabled {
-		return fmt.Errorf("xray must be enabled in config to connect")
+	if cfg.Xray.RelayHost == "" {
+		return fmt.Errorf("xray.relay_host must be set in config to connect")
 	}
 
 	// Auto-generate UUID if missing.
@@ -50,7 +50,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start Xray in client mode.
-	xrayInstance, err := twxray.NewClient(cfg.Xray, cfg.Client)
+	xrayInstance, err := twxray.NewClient(cfg.Xray)
 	if err != nil {
 		return fmt.Errorf("initializing Xray: %w", err)
 	}
@@ -63,7 +63,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	// Start SSH forward tunnel through Xray to the server.
 	privPath := filepath.Join(config.Dir(), "id_ed25519")
 	ft := &twssh.ForwardTunnel{
-		RemoteAddr: fmt.Sprintf("127.0.0.1:%d", cfg.Client.XrayListenPort),
+		RemoteAddr: fmt.Sprintf("127.0.0.1:%d", twxray.ClientListenPort),
 		User:       cfg.Client.SSHUser,
 		KeyPath:    privPath,
 		LocalPort:  cfg.Client.LocalPort,
