@@ -122,7 +122,7 @@ tw/
 ├── cmd/
 │   └── tw/                      # binary entry point
 ├── internal/
-│   ├── cli/                     # cobra commands (init, dashboard, connect)
+│   ├── cli/                     # cobra commands (serve, connect, dashboard)
 │   ├── config/                  # YAML config loading, platform-specific paths
 │   ├── core/                    # core service — orchestrates all operations
 │   ├── api/                     # gRPC API service
@@ -237,13 +237,22 @@ relay:
   provider: aws
   domain: ""
   region: ""
+xray:
+  enabled: false
+  uuid: ""                       # auto-generated on first run
+  relay_host: ""                 # e.g. shadow.mint-tunnel.com
+  relay_port: 443
+  path: /tw
+  relay_ssh_port: 22
+  relay_ssh_user: ubuntu
+  remote_port: 2222              # port exposed on relay for clients
 ```
 
 ### 7.2 Linux
 
 ```bash
 # install as a systemd service, enable, and start it
-tw init --as-server
+tw serve
 
 # bring up the dashboard UI (calls the API service)
 tw dashboard
@@ -253,16 +262,19 @@ tw dashboard
 
 ```powershell
 # install as a Windows service, set to automatic, and start it
-tw.exe init --as-server
+tw.exe serve
 
 # bring up the dashboard UI (calls the API service)
 tw dashboard
 ```
 
-### 7.4 What `init --as-server` Starts
+### 7.4 What `tw serve` Starts
 
 1. Loads (or creates) `config.yaml` from the platform config directory
-2. Generates an ed25519 SSH client key pair (`id_ed25519` / `id_ed25519.pub`) for relay access
+2. Generates an ed25519 SSH key pair (`id_ed25519` / `id_ed25519.pub`) if missing
 3. Generates an ed25519 host key (`ssh_host_ed25519_key`) for the embedded SSH server
 4. Starts the **embedded SSH server** on the configured port (default `:2222`)
-5. Starts the **gRPC API server** on the configured port (default `:50051`)
+5. If `xray.enabled`:
+   * Starts **Xray** in-process (dokodemo-door → VLESS/splithttp/TLS to relay)
+   * Opens an **SSH reverse tunnel** through Xray to the relay (`-R remote_port:localhost:ssh_port`)
+6. Starts the **gRPC API server** on the configured port (default `:50051`)
