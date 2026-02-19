@@ -16,6 +16,7 @@ type Config struct {
 	Dashboard DashboardConfig `yaml:"dashboard"`
 	Relay     RelayConfig     `yaml:"relay"`
 	Xray      XrayConfig      `yaml:"xray"`
+	Client    ClientConfig    `yaml:"client"`
 }
 
 type SSHConfig struct {
@@ -50,6 +51,15 @@ type XrayConfig struct {
 	RemotePort   int    `yaml:"remote_port"`
 }
 
+type ClientConfig struct {
+	SSHUser        string `yaml:"ssh_user"`
+	LocalPort      int    `yaml:"local_port"`
+	RemoteHost     string `yaml:"remote_host"`
+	RemotePort     int    `yaml:"remote_port"`
+	XrayListenPort int    `yaml:"xray_listen_port"`
+	ServerSSHPort  int    `yaml:"server_ssh_port"`
+}
+
 // Default returns the default configuration.
 func Default() *Config {
 	return &Config{
@@ -74,6 +84,14 @@ func Default() *Config {
 			RelaySSHPort: 22,
 			RelaySSHUser: "ubuntu",
 			RemotePort:   2222,
+		},
+		Client: ClientConfig{
+			SSHUser:        "tunnel",
+			LocalPort:      53389,
+			RemoteHost:     "localhost",
+			RemotePort:     3389,
+			XrayListenPort: 54001,
+			ServerSSHPort:  2222,
 		},
 	}
 }

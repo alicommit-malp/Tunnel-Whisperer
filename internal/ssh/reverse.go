@@ -32,9 +32,10 @@ type ReverseTunnel struct {
 
 // Run connects to the remote SSH server, sets up the reverse port
 // forward, and blocks until the tunnel is closed or an error occurs.
-// It automatically reconnects on failure.
+// It automatically reconnects with exponential backoff on failure.
 func (rt *ReverseTunnel) Run() error {
 	rt.done = make(chan struct{})
+	backoff := time.Second * 2
 
 	for {
 		select {
@@ -46,13 +47,22 @@ func (rt *ReverseTunnel) Run() error {
 		err := rt.connect()
 		if err != nil {
 			log.Printf("reverse-tunnel: connection failed: %v", err)
+		} else {
+			// Successful connection resets backoff.
+			backoff = time.Second * 2
 		}
 
 		select {
 		case <-rt.done:
 			return nil
-		case <-time.After(5 * time.Second):
-			log.Println("reverse-tunnel: reconnecting...")
+		case <-time.After(backoff):
+			log.Printf("reverse-tunnel: reconnecting (backoff %s)...", backoff)
+		}
+
+		// Exponential backoff: 2s → 4s → 8s → 16s → 30s (max).
+		backoff *= 2
+		if backoff > 30*time.Second {
+			backoff = 30 * time.Second
 		}
 	}
 }
@@ -84,7 +94,6 @@ func (rt *ReverseTunnel) connect() error {
 		return fmt.Errorf("dialing %s: %w", rt.RemoteAddr, err)
 	}
 
-	// Enable TCP keepalive.
 	if tc, ok := conn.(*net.TCPConn); ok {
 		tc.SetKeepAlive(true)
 		tc.SetKeepAlivePeriod(30 * time.Second)
@@ -98,6 +107,9 @@ func (rt *ReverseTunnel) connect() error {
 
 	rt.client = gossh.NewClient(sshConn, chans, reqs)
 
+	// Start SSH keepalive in background.
+	go rt.keepalive(sshConn)
+
 	// Request reverse port forward.
 	listener, err := rt.client.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", rt.RemotePort))
 	if err != nil {
@@ -108,7 +120,6 @@ func (rt *ReverseTunnel) connect() error {
 
 	log.Printf("reverse-tunnel: listening on relay :%d → %s", rt.RemotePort, rt.LocalAddr)
 
-	// Accept connections on the remote side and forward to local.
 	for {
 		remote, err := listener.Accept()
 		if err != nil {
@@ -124,7 +135,32 @@ func (rt *ReverseTunnel) connect() error {
 	}
 }
 
+// keepalive sends periodic SSH keepalive requests to detect dead connections.
+func (rt *ReverseTunnel) keepalive(conn gossh.Conn) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-rt.done:
+			return
+		case <-ticker.C:
+			_, _, err := conn.SendRequest("keepalive@tw", true, nil)
+			if err != nil {
+				log.Printf("reverse-tunnel: keepalive failed: %v", err)
+				conn.Close()
+				return
+			}
+		}
+	}
+}
+
 func (rt *ReverseTunnel) forward(remote net.Conn) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("reverse-tunnel: panic in forward: %v", r)
+		}
+	}()
 	defer remote.Close()
 
 	local, err := net.DialTimeout("tcp", rt.LocalAddr, 10*time.Second)
