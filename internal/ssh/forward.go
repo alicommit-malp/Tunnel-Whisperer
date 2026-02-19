@@ -12,9 +12,15 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 )
 
-// ForwardTunnel connects to a remote SSH server and sets up local
-// port forwarding (-L) so that a local port forwards through SSH
-// to a remote destination.
+// Mapping defines a single local-port → remote-host:port forwarding rule.
+type Mapping struct {
+	LocalPort  int
+	RemoteHost string
+	RemotePort int
+}
+
+// ForwardTunnel connects to a remote SSH server and sets up multiple local
+// port forwards (-L) over a single SSH session.
 type ForwardTunnel struct {
 	// Remote SSH server to connect to (via Xray tunnel).
 	RemoteAddr string
@@ -22,22 +28,18 @@ type ForwardTunnel struct {
 	User string
 	// Path to the private key for authentication.
 	KeyPath string
-	// Port on localhost to listen on.
-	LocalPort int
-	// Remote host to forward to (from the SSH server's perspective).
-	RemoteHost string
-	// Remote port to forward to.
-	RemotePort int
+	// Port mappings to forward.
+	Mappings []Mapping
 
-	mu       sync.Mutex
-	client   *gossh.Client
-	listener net.Listener
-	done     chan struct{}
+	mu        sync.Mutex
+	client    *gossh.Client
+	listeners []net.Listener
+	done      chan struct{}
 }
 
-// Run connects to the remote SSH server, listens locally, and forwards
-// connections through SSH. It automatically reconnects with exponential
-// backoff on failure.
+// Run connects to the remote SSH server, starts all local listeners, and
+// forwards connections through SSH. It automatically reconnects with
+// exponential backoff on failure.
 func (ft *ForwardTunnel) Run() error {
 	ft.done = make(chan struct{})
 	backoff := time.Second * 2
@@ -74,16 +76,17 @@ func (ft *ForwardTunnel) Run() error {
 	}
 }
 
-// cleanup closes the current listener and SSH client so ports are freed
+// cleanup closes all listeners and the SSH client so ports are freed
 // for the next reconnection attempt.
 func (ft *ForwardTunnel) cleanup() {
 	ft.mu.Lock()
 	defer ft.mu.Unlock()
 
-	if ft.listener != nil {
-		ft.listener.Close()
-		ft.listener = nil
+	for _, l := range ft.listeners {
+		l.Close()
 	}
+	ft.listeners = nil
+
 	if ft.client != nil {
 		ft.client.Close()
 		ft.client = nil
@@ -132,43 +135,70 @@ func (ft *ForwardTunnel) connect() error {
 	ft.client = gossh.NewClient(sshConn, chans, reqs)
 	ft.mu.Unlock()
 
-	// Start SSH keepalive — on failure it closes both the SSH connection
-	// AND the local listener so connect() can return and the reconnect
-	// loop fires.
+	// Start SSH keepalive — on failure it closes all listeners and the SSH
+	// connection so connect() returns and the reconnect loop fires.
 	go ft.keepalive(sshConn)
 
-	// Listen locally.
-	listenAddr := fmt.Sprintf("127.0.0.1:%d", ft.LocalPort)
-	listener, err := net.Listen("tcp", listenAddr)
-	if err != nil {
-		ft.client.Close()
-		return fmt.Errorf("listening on %s: %w", listenAddr, err)
+	// Start a local listener for each mapping.
+	// All listeners share the same SSH client.
+	acceptDone := make(chan struct{})
+	var wg sync.WaitGroup
+
+	for _, m := range ft.Mappings {
+		listenAddr := fmt.Sprintf("127.0.0.1:%d", m.LocalPort)
+		listener, err := net.Listen("tcp", listenAddr)
+		if err != nil {
+			close(acceptDone)
+			wg.Wait()
+			ft.client.Close()
+			return fmt.Errorf("listening on %s: %w", listenAddr, err)
+		}
+
+		ft.mu.Lock()
+		ft.listeners = append(ft.listeners, listener)
+		ft.mu.Unlock()
+
+		log.Printf("forward-tunnel: localhost:%d → %s:%d (via SSH)", m.LocalPort, m.RemoteHost, m.RemotePort)
+
+		wg.Add(1)
+		go func(l net.Listener, m Mapping) {
+			defer wg.Done()
+			ft.acceptLoop(l, m, acceptDone)
+		}(listener, m)
 	}
 
-	ft.mu.Lock()
-	ft.listener = listener
-	ft.mu.Unlock()
+	// Block until all accept loops finish (triggered by keepalive failure or Stop).
+	wg.Wait()
 
-	log.Printf("forward-tunnel: localhost:%d → %s:%d (via SSH)", ft.LocalPort, ft.RemoteHost, ft.RemotePort)
+	select {
+	case <-ft.done:
+		return nil
+	default:
+		return fmt.Errorf("all listeners closed")
+	}
+}
 
+// acceptLoop accepts connections on a listener and forwards them through SSH.
+func (ft *ForwardTunnel) acceptLoop(listener net.Listener, m Mapping, done <-chan struct{}) {
 	for {
 		local, err := listener.Accept()
 		if err != nil {
 			select {
 			case <-ft.done:
-				return nil
+			case <-done:
 			default:
+				log.Printf("forward-tunnel: accept error on :%d: %v", m.LocalPort, err)
 			}
-			return fmt.Errorf("accepting connection: %w", err)
+			return
 		}
 
-		go ft.forward(local)
+		go ft.forward(local, m)
 	}
 }
 
 // keepalive sends periodic SSH keepalive requests to detect dead connections.
-// On failure, it closes both the SSH connection AND the local listener so
-// that connect() unblocks and the reconnect loop fires.
+// On failure, it closes all listeners and the SSH connection so that
+// connect() unblocks and the reconnect loop fires.
 func (ft *ForwardTunnel) keepalive(conn gossh.Conn) {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
@@ -181,10 +211,10 @@ func (ft *ForwardTunnel) keepalive(conn gossh.Conn) {
 			_, _, err := conn.SendRequest("keepalive@tw", true, nil)
 			if err != nil {
 				log.Printf("forward-tunnel: keepalive failed, triggering reconnect: %v", err)
-				// Close listener first — this unblocks Accept() in connect().
+				// Close listeners first — this unblocks Accept() in all loops.
 				ft.mu.Lock()
-				if ft.listener != nil {
-					ft.listener.Close()
+				for _, l := range ft.listeners {
+					l.Close()
 				}
 				ft.mu.Unlock()
 				conn.Close()
@@ -194,7 +224,7 @@ func (ft *ForwardTunnel) keepalive(conn gossh.Conn) {
 	}
 }
 
-func (ft *ForwardTunnel) forward(local net.Conn) {
+func (ft *ForwardTunnel) forward(local net.Conn, m Mapping) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("forward-tunnel: panic in forward: %v", r)
@@ -211,7 +241,7 @@ func (ft *ForwardTunnel) forward(local net.Conn) {
 		return
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", ft.RemoteHost, ft.RemotePort)
+	remoteAddr := fmt.Sprintf("%s:%d", m.RemoteHost, m.RemotePort)
 	remote, err := client.Dial("tcp", remoteAddr)
 	if err != nil {
 		log.Printf("forward-tunnel: failed to dial %s via SSH: %v", remoteAddr, err)

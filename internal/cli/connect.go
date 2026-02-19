@@ -39,6 +39,10 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("xray.relay_host must be set in config to connect")
 	}
 
+	if len(cfg.Client.Tunnels) == 0 {
+		return fmt.Errorf("no tunnels defined in client.tunnels config")
+	}
+
 	// Auto-generate UUID if missing.
 	if cfg.Xray.UUID == "" {
 		cfg.Xray.UUID = uuid.New().String()
@@ -60,19 +64,26 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	defer xrayInstance.Close()
 	fmt.Printf("Xray tunnel active → %s:%d%s\n", cfg.Xray.RelayHost, cfg.Xray.RelayPort, cfg.Xray.Path)
 
-	// Start SSH forward tunnel through Xray to the server.
+	// Build mappings from config.
+	mappings := make([]twssh.Mapping, len(cfg.Client.Tunnels))
+	for i, t := range cfg.Client.Tunnels {
+		mappings[i] = twssh.Mapping{
+			LocalPort:  t.LocalPort,
+			RemoteHost: t.RemoteHost,
+			RemotePort: t.RemotePort,
+		}
+		fmt.Printf("Forwarding localhost:%d → server %s:%d\n",
+			t.LocalPort, t.RemoteHost, t.RemotePort)
+	}
+
+	// Single SSH session handles all port mappings.
 	privPath := filepath.Join(config.Dir(), "id_ed25519")
 	ft := &twssh.ForwardTunnel{
 		RemoteAddr: fmt.Sprintf("127.0.0.1:%d", twxray.ClientListenPort),
 		User:       cfg.Client.SSHUser,
 		KeyPath:    privPath,
-		LocalPort:  cfg.Client.LocalPort,
-		RemoteHost: cfg.Client.RemoteHost,
-		RemotePort: cfg.Client.RemotePort,
+		Mappings:   mappings,
 	}
-
-	fmt.Printf("Forwarding localhost:%d → server %s:%d\n",
-		cfg.Client.LocalPort, cfg.Client.RemoteHost, cfg.Client.RemotePort)
 
 	// Run blocks until stopped (Ctrl-C).
 	return ft.Run()

@@ -242,10 +242,14 @@ server:                          # only needed for `tw serve`
 
 client:                          # only needed for `tw connect`
   ssh_user: tunnel
-  local_port: 53389              # expose on client localhost
-  remote_host: localhost         # target from server's perspective
-  remote_port: 3389              # target port on server (e.g. RDP)
   server_ssh_port: 2222          # server's SSH port on relay
+  tunnels:
+    - local_port: 53389          # expose on client localhost
+      remote_host: 172.19.176.1  # target from server's perspective
+      remote_port: 3389          # RDP
+    - local_port: 55432
+      remote_host: 10.0.0.5
+      remote_port: 5432          # PostgreSQL
 ```
 
 ### 7.2 Building

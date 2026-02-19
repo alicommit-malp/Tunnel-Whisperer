@@ -36,11 +36,16 @@ type ServerConfig struct {
 
 // ClientConfig holds settings only used by `tw connect`.
 type ClientConfig struct {
-	SSHUser       string `yaml:"ssh_user"`
-	LocalPort     int    `yaml:"local_port"`
-	RemoteHost    string `yaml:"remote_host"`
-	RemotePort    int    `yaml:"remote_port"`
-	ServerSSHPort int    `yaml:"server_ssh_port"`
+	SSHUser       string   `yaml:"ssh_user"`
+	ServerSSHPort int      `yaml:"server_ssh_port"`
+	Tunnels       []Tunnel `yaml:"tunnels"`
+}
+
+// Tunnel defines a single local-port → remote-host:remote-port mapping.
+type Tunnel struct {
+	LocalPort  int    `yaml:"local_port"`
+	RemoteHost string `yaml:"remote_host"`
+	RemotePort int    `yaml:"remote_port"`
 }
 
 // Default returns the default configuration.
@@ -60,9 +65,6 @@ func Default() *Config {
 		},
 		Client: ClientConfig{
 			SSHUser:       "tunnel",
-			LocalPort:     53389,
-			RemoteHost:    "localhost",
-			RemotePort:    3389,
 			ServerSSHPort: 2222,
 		},
 	}
