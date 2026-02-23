@@ -75,7 +75,7 @@ Client Network                   Public Cloud                    Server Network
 
 1. **Transport Layer:** Traffic is encapsulated in **Xray VLESS over splitHTTP + TLS** on port 443. This looks like standard HTTPS to firewalls, proxies, and DPI systems.
 2. **Relay:** A lightweight cloud VM (Hetzner, DigitalOcean, or AWS) provisioned via `tw create relay-server`. It runs Caddy (TLS/ACME) and Xray (VLESS inbound). SSH listens on localhost only — no port 22 exposed.
-3. **Tunnel Layer:** Inside the Xray stream, OpenSSH handles port forwarding, encryption, and per-user authentication with `authorized_keys` restrictions.
+3. **Tunnel Layer:** Inside the Xray stream, an embedded SSH server (Go `x/crypto/ssh`) handles port forwarding, encryption, and per-user authentication with `authorized_keys` restrictions.
 
 **Key properties:**
 - Zero inbound ports on both server and client — all connections are outbound to :443
@@ -88,7 +88,7 @@ Client Network                   Public Cloud                    Server Network
 
 ### 1. Build
 
-Requires **Go 1.22+**.
+Requires **Go 1.22+** and **Terraform** (for relay provisioning).
 
 ```bash
 go build -o bin/tw ./cmd/tw
@@ -101,19 +101,32 @@ GOOS=windows GOARCH=amd64 go build -o bin/tw.exe ./cmd/tw
 
 ### 2. Provision a relay
 
-Interactive wizard that deploys a relay VM with Caddy + Xray + firewall via Terraform:
+Interactive 8-step wizard that deploys a relay VM with Caddy + Xray + firewall via Terraform:
 
 ```bash
 tw create relay-server
 ```
 
 Supports **Hetzner**, **DigitalOcean**, and **AWS**. The wizard walks through:
-1. SSH key generation
-2. Xray UUID generation
-3. Relay domain configuration
-4. Cloud provider selection and credentials
-5. Terraform provisioning
-6. DNS setup and TLS readiness check
+
+1. **SSH key generation** — creates ed25519 key pair if missing
+2. **Xray UUID generation** — creates or reuses the server's transport UUID
+3. **Relay domain** — sets `xray.relay_host` (e.g. `relay.example.com`)
+4. **Cloud provider selection** — choose Hetzner, DigitalOcean, or AWS
+5. **Credentials** — enter API token (Hetzner/DO) or Access Key + Secret (AWS); credentials are validated against the provider API before proceeding
+6. **Credential test** — Hetzner/DO tokens are tested via API call; AWS keys are format-checked (full validation happens during `terraform apply`)
+7. **Terraform provisioning** — generates cloud-init + provider-specific `main.tf`, runs `terraform init` and `terraform apply`, outputs the relay's public IP
+8. **DNS + HTTPS readiness** — prompts you to create an A record, then polls DNS resolution and waits for Caddy to issue the TLS certificate
+
+If a relay already exists (terraform state present), the wizard offers to destroy and recreate it.
+
+The relay VM is configured via cloud-init to:
+- Create an SSH user with the server's public key and passwordless sudo
+- Install Caddy (from official apt repo) and Xray (from official install script)
+- Write Xray config: VLESS inbound on `127.0.0.1:10000` with splitHTTP transport
+- Write Caddyfile: reverse proxy `<domain>` path `/tw*` to Xray
+- Lock SSH to `127.0.0.1` only with password auth disabled
+- Configure firewall (ufw): deny all incoming, allow 80/tcp + 443/tcp
 
 ### 3. Create a client user
 
@@ -123,14 +136,23 @@ On the server, create a user with locked-down port access:
 tw create user
 ```
 
-This generates:
-- A unique Xray UUID for the client
-- An SSH key pair
-- A ready-to-use client config with tunnel mappings
-- Updates the relay's Xray config with the new UUID (via SSH)
-- Adds the client's public key to the server's `authorized_keys` with `permitopen` restrictions
+Interactive 5-step wizard:
 
-The output directory (e.g., `/etc/tw/config/users/alice/`) is sent to the client.
+1. **User name** — alphanumeric, dashes, underscores; must be unique
+2. **Port mappings** — define one or more mappings sequentially:
+   - Client local port (the port the client listens on)
+   - Server port (the `127.0.0.1` port on the server to forward to)
+   - Remote host is locked to `127.0.0.1` — no access to the server's wider network
+3. **Generate credentials** — creates a unique Xray UUID and ed25519 SSH key pair for the client
+4. **Update relay** — connects to the relay via a temporary Xray tunnel (port 59001), SSHs in, adds the new UUID to the relay's Xray config (`/usr/local/etc/xray/config.json`), and restarts Xray on the relay
+5. **Save configuration** — writes the client's config files and keys to `<config_dir>/users/<name>/`, and appends the client's public key to the server's `authorized_keys` with `permitopen` restrictions
+
+The generated `authorized_keys` entry:
+```
+permitopen="127.0.0.1:5432",permitopen="127.0.0.1:8080" ssh-ed25519 AAAA... alice@tw
+```
+
+Output directory (e.g. `/etc/tw/config/users/alice/`) contains `config.yaml`, `id_ed25519`, and `id_ed25519.pub` — send these to the client.
 
 ### 4. Start the server
 
@@ -139,9 +161,9 @@ tw serve
 ```
 
 This starts:
-1. Embedded SSH server on `:2222`
-2. Xray tunnel to the relay (VLESS + splitHTTP + TLS)
-3. SSH reverse port forward through Xray to the relay
+1. Embedded SSH server on `:2222` (Go `x/crypto/ssh`) with dynamic `authorized_keys` and `permitopen` enforcement
+2. Xray in-process tunnel to the relay (VLESS + splitHTTP + TLS on port 443)
+3. SSH reverse port forward through Xray to the relay (`-R 2222:localhost:2222`)
 4. gRPC API server on `:50051`
 
 ### 5. Connect as a client
@@ -153,9 +175,9 @@ tw connect
 ```
 
 This starts:
-1. Xray client tunnel to the relay
-2. SSH connection through Xray to the server
-3. Local port listeners that forward through the SSH tunnel
+1. Xray client tunnel to the relay (dokodemo-door on `:54001` forwarding to the server's SSH port on the relay)
+2. SSH connection through Xray to the server's embedded SSH (public key auth)
+3. Local port listeners for all configured tunnel mappings, forwarding through a single SSH session
 
 ---
 
@@ -163,11 +185,11 @@ This starts:
 
 | Command | Description |
 |---------|-------------|
-| `tw serve` | Start the server (SSH, Xray tunnel, reverse port forward, gRPC API) |
+| `tw serve` | Start the server (SSH server, Xray tunnel, reverse port forward, gRPC API) |
 | `tw connect` | Connect to the server as a client (Xray tunnel, SSH port forwarding) |
-| `tw create relay-server` | Interactive wizard to provision a relay VM on a cloud provider |
-| `tw create user` | Create a client user with UUID, SSH keys, and port restrictions |
-| `tw dashboard` | Start the web dashboard (status page) |
+| `tw create relay-server` | Interactive 8-step wizard to provision a relay VM on Hetzner, DigitalOcean, or AWS |
+| `tw create user` | Interactive 5-step wizard to create a client user with UUID, SSH keys, and port restrictions |
+| `tw dashboard` | Start the web dashboard (HTTP status page) |
 
 ---
 
@@ -196,7 +218,7 @@ client:                          # only used by `tw connect`
   tunnels:                       # port forwarding mappings
     - local_port: 5432           # listen on client localhost
       remote_host: 127.0.0.1    # target on server (localhost only)
-      remote_port: 5432          # PostgreSQL
+      remote_port: 5432          # e.g. PostgreSQL
 ```
 
 Config paths:
@@ -213,9 +235,9 @@ Override with `TW_CONFIG_DIR` environment variable.
 ## Security Model
 
 - **Transport:** Xray VLESS + splitHTTP over TLS on port 443. Indistinguishable from regular HTTPS traffic.
-- **Authentication:** SSH public key authentication. Each client gets a unique key pair.
+- **Authentication:** SSH public key authentication. Each client gets a unique ed25519 key pair.
 - **Authorization:** `permitopen` restrictions in `authorized_keys` limit each client to specific `127.0.0.1:<port>` targets — no access to the server's wider network.
-- **Dynamic keys:** The SSH server re-reads `authorized_keys` on every authentication attempt. Adding or revoking users takes effect immediately without restarting `tw serve`.
+- **Dynamic keys:** The embedded SSH server re-reads `authorized_keys` on every authentication attempt. Adding or revoking users takes effect immediately without restarting `tw serve`.
 - **Relay isolation:** SSH on the relay listens on `127.0.0.1` only. The firewall exposes only ports 80 (ACME) and 443 (HTTPS). The relay never sees plaintext — it's just a transport passthrough.
 - **Per-user UUIDs:** Each client has a unique Xray UUID registered on the relay, allowing individual revocation at the transport layer.
 
