@@ -1,0 +1,163 @@
+{{define "content"}}
+<h1>Status</h1>
+
+{{if eq .Mode "server"}}
+<!-- ── Server Mode ──────────────────────────────────────────────── -->
+<div class="card">
+  <div class="card-header">
+    <h2>Server</h2>
+    <span class="badge badge-state" data-bind="server-badge">{{.ServerStatus.State}}</span>
+  </div>
+
+  <div class="kv">
+    <span class="kv-label">Config</span>
+    <span class="kv-value">{{.ConfigPath}}</span>
+    <span class="kv-label">SSH</span>
+    <span class="kv-value" data-bind="srv-ssh">{{if .ServerStatus.SSH}}up{{else}}down{{end}}</span>
+    <span class="kv-label">Xray</span>
+    <span class="kv-value" data-bind="srv-xray">{{if .ServerStatus.Xray}}up{{else}}down{{end}}</span>
+    <span class="kv-label">Reverse Tunnel</span>
+    <span class="kv-value" data-bind="srv-tunnel">{{if .ServerStatus.Tunnel}}up{{else}}down{{end}}</span>
+    <span class="kv-label">gRPC API</span>
+    <span class="kv-value" data-bind="srv-api">{{if .ServerStatus.API}}up{{else}}down{{end}}</span>
+  </div>
+
+  {{if .ServerStatus.Error}}
+  <div class="alert alert-error mt-16" data-bind="srv-error">{{.ServerStatus.Error}}</div>
+  {{end}}
+
+  <div class="mt-16 flex gap-8">
+    {{if eq .ServerStatus.State "stopped"}}
+      {{if .Relay.Provisioned}}
+        <button class="btn btn-primary" id="btn-server-start" onclick="serverStart()">Start Server</button>
+      {{else}}
+        <a href="/relay/wizard" class="btn btn-primary">Provision Relay First</a>
+      {{end}}
+    {{else if eq .ServerStatus.State "running"}}
+      <button class="btn btn-danger" id="btn-server-stop" onclick="serverStop()">Stop Server</button>
+    {{else if eq .ServerStatus.State "error"}}
+      <button class="btn btn-primary" id="btn-server-start" onclick="serverStart()">Retry Start</button>
+    {{else}}
+      <button class="btn" disabled>{{.ServerStatus.State}}...</button>
+    {{end}}
+  </div>
+
+  <div id="server-progress" class="progress-log mt-16 hidden"></div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>Relay</h2>
+    {{if .Relay.Provisioned}}
+      <span class="badge badge-green">provisioned</span>
+    {{else}}
+      <span class="badge badge-dim">not provisioned</span>
+    {{end}}
+  </div>
+  <div class="kv">
+    <span class="kv-label">Domain</span>
+    <span class="kv-value">{{or .Relay.Domain "—"}}</span>
+    {{if .Relay.Provisioned}}
+    <span class="kv-label">IP</span>
+    <span class="kv-value">{{or .Relay.IP "—"}}</span>
+    <span class="kv-label">Provider</span>
+    <span class="kv-value">{{or .Relay.Provider "—"}}</span>
+    {{end}}
+  </div>
+  {{if not .Relay.Provisioned}}
+  <div class="mt-16">
+    <a href="/relay/wizard" class="btn btn-primary">Provision Relay</a>
+  </div>
+  {{end}}
+</div>
+
+{{if eq .ServerStatus.State "running"}}
+<div class="card">
+  <div class="card-header">
+    <h2>Users</h2>
+    <span class="badge badge-dim">{{.UserCount}}</span>
+  </div>
+  <div class="mt-16 flex gap-8">
+    <a href="/users" class="btn">View Users</a>
+    <a href="/users/new" class="btn btn-primary">Create User</a>
+  </div>
+</div>
+{{end}}
+
+{{else if eq .Mode "client"}}
+<!-- ── Client Mode ──────────────────────────────────────────────── -->
+<div class="card">
+  <div class="card-header">
+    <h2>Client</h2>
+    <span class="badge badge-state" data-bind="client-badge">{{.ClientStatus.State}}</span>
+  </div>
+
+  {{if and (eq .ClientStatus.State "stopped") (eq .Config.Xray.RelayHost "")}}
+  <!-- No config uploaded yet -->
+  <p class="text-dim mb-16">Upload the config zip you received from the server admin.</p>
+  <form id="upload-form" enctype="multipart/form-data">
+    <div class="upload-area" id="upload-area">
+      <input type="file" name="config" id="config-file" accept=".zip" class="hidden">
+      <p>Drop config zip here or <a href="#" onclick="document.getElementById('config-file').click(); return false;">browse</a></p>
+      <p class="text-dim" id="upload-filename"></p>
+    </div>
+    <button type="submit" class="btn btn-primary mt-16" id="btn-upload" disabled>Upload Config</button>
+  </form>
+  <div id="upload-error" class="alert alert-error mt-16 hidden"></div>
+
+  {{else}}
+  <!-- Config is loaded -->
+  <div class="kv">
+    <span class="kv-label">Relay</span>
+    <span class="kv-value">{{.Config.Xray.RelayHost}}:{{.Config.Xray.RelayPort}}{{.Config.Xray.Path}}</span>
+    <span class="kv-label">Xray</span>
+    <span class="kv-value" data-bind="cli-xray">{{if .ClientStatus.Xray}}up{{else}}down{{end}}</span>
+    <span class="kv-label">Tunnel</span>
+    <span class="kv-value" data-bind="cli-tunnel">{{if .ClientStatus.Tunnel}}up{{else}}down{{end}}</span>
+    {{range .Config.Client.Tunnels}}
+    <span class="kv-label">Forward</span>
+    <span class="kv-value">localhost:{{.LocalPort}} &rarr; {{.RemoteHost}}:{{.RemotePort}}</span>
+    {{end}}
+  </div>
+
+  {{if .ClientStatus.Error}}
+  <div class="alert alert-error mt-16" data-bind="cli-error">{{.ClientStatus.Error}}</div>
+  {{end}}
+
+  <div class="mt-16 flex gap-8">
+    {{if eq .ClientStatus.State "stopped"}}
+      <button class="btn btn-primary" id="btn-client-start" onclick="clientStart()">Connect</button>
+    {{else if eq .ClientStatus.State "running"}}
+      <button class="btn btn-danger" id="btn-client-stop" onclick="clientStop()">Disconnect</button>
+    {{else if eq .ClientStatus.State "error"}}
+      <button class="btn btn-primary" id="btn-client-start" onclick="clientStart()">Retry</button>
+    {{else}}
+      <button class="btn" disabled>{{.ClientStatus.State}}...</button>
+    {{end}}
+  </div>
+
+  <div id="client-progress" class="progress-log mt-16 hidden"></div>
+  {{end}}
+</div>
+
+{{if and (ne .Config.Xray.RelayHost "") (eq .ClientStatus.State "stopped")}}
+<div class="card">
+  <div class="card-header"><h2>Replace Config</h2></div>
+  <form id="upload-form" enctype="multipart/form-data">
+    <div class="upload-area" id="upload-area">
+      <input type="file" name="config" id="config-file" accept=".zip" class="hidden">
+      <p>Drop config zip here or <a href="#" onclick="document.getElementById('config-file').click(); return false;">browse</a></p>
+      <p class="text-dim" id="upload-filename"></p>
+    </div>
+    <button type="submit" class="btn mt-16" id="btn-upload" disabled>Upload New Config</button>
+  </form>
+  <div id="upload-error" class="alert alert-error mt-16 hidden"></div>
+</div>
+{{end}}
+
+{{end}}
+{{end}}
+
+{{define "scripts"}}
+<script src="/static/js/status.js"></script>
+{{end}}

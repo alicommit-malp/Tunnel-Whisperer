@@ -3,15 +3,13 @@ package cli
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+	"os/signal"
+	"syscall"
 
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
-	"github.com/tunnelwhisperer/tw/internal/api"
 	"github.com/tunnelwhisperer/tw/internal/config"
-	"github.com/tunnelwhisperer/tw/internal/core"
-	twssh "github.com/tunnelwhisperer/tw/internal/ssh"
-	twxray "github.com/tunnelwhisperer/tw/internal/xray"
+	"github.com/tunnelwhisperer/tw/internal/dashboard"
+	"github.com/tunnelwhisperer/tw/internal/ops"
 )
 
 var serveCmd = &cobra.Command{
@@ -27,129 +25,39 @@ func init() {
 func runServe(cmd *cobra.Command, args []string) error {
 	fmt.Println("Starting Tunnel Whisperer server...")
 
-	// Load configuration.
-	cfg, err := config.Load()
+	o, err := ops.New()
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return fmt.Errorf("initializing ops: %w", err)
 	}
+
+	cfg := o.Config()
 	fmt.Printf("Config: %s\n", config.FilePath())
 
-	// Ensure config directory and keys exist.
-	if err := ensureKeys(cfg); err != nil {
+	// Start dashboard if configured (before server so user can see progress).
+	if cfg.Server.DashboardPort > 0 {
+		dashAddr := fmt.Sprintf(":%d", cfg.Server.DashboardPort)
+		dashSrv := dashboard.NewServer(dashAddr, o)
+		go func() {
+			fmt.Printf("Dashboard on http://localhost%s\n", dashAddr)
+			if err := dashSrv.Run(); err != nil {
+				fmt.Printf("Dashboard error: %v\n", err)
+			}
+		}()
+	}
+
+	// Start all server components via the manager.
+	if err := o.StartServer(cliProgress); err != nil {
 		return err
 	}
 
-	// Initialize core service.
-	svc := core.New(config.Dir())
-	if err := svc.Init(); err != nil {
-		return fmt.Errorf("initializing core service: %w", err)
-	}
+	fmt.Println("Server running. Press Ctrl-C to stop.")
 
-	// Start SSH server.
-	sshServer, err := twssh.NewServer(cfg.Server.SSHPort, config.HostKeyDir(), config.AuthorizedKeysPath())
-	if err != nil {
-		return fmt.Errorf("initializing SSH server: %w", err)
-	}
-	go func() {
-		fmt.Printf("SSH server on :%d\n", cfg.Server.SSHPort)
-		if err := sshServer.Run(); err != nil {
-			fmt.Printf("SSH server error: %v\n", err)
-		}
-	}()
+	// Block until signal.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	<-sig
 
-	// Start Xray tunnel if relay_host is configured.
-	if cfg.Xray.RelayHost != "" {
-		if cfg.Xray.UUID == "" {
-			cfg.Xray.UUID = uuid.New().String()
-			if err := config.Save(cfg); err != nil {
-				fmt.Printf("Warning: could not save generated UUID: %v\n", err)
-			} else {
-				fmt.Printf("Generated Xray UUID: %s\n", cfg.Xray.UUID)
-			}
-		}
-
-		xrayInstance, err := twxray.New(cfg.Xray)
-		if err != nil {
-			return fmt.Errorf("initializing Xray: %w", err)
-		}
-		if err := xrayInstance.Start(cfg.Server.SSHPort, cfg.Server.RelaySSHPort); err != nil {
-			return fmt.Errorf("starting Xray: %w", err)
-		}
-		defer xrayInstance.Close()
-		fmt.Printf("Xray tunnel active → %s:%d%s\n", cfg.Xray.RelayHost, cfg.Xray.RelayPort, cfg.Xray.Path)
-
-		// Xray local listen port is sshPort + 1.
-		xrayListenPort := cfg.Server.SSHPort + 1
-
-		// Start SSH reverse tunnel through Xray to the relay.
-		privPath := filepath.Join(config.Dir(), "id_ed25519")
-		rt := &twssh.ReverseTunnel{
-			RemoteAddr: fmt.Sprintf("127.0.0.1:%d", xrayListenPort),
-			User:       cfg.Server.RelaySSHUser,
-			KeyPath:    privPath,
-			RemotePort: cfg.Server.RemotePort,
-			LocalAddr:  fmt.Sprintf("127.0.0.1:%d", cfg.Server.SSHPort),
-		}
-		go func() {
-			fmt.Printf("Reverse tunnel: relay :%d → local :%d (via Xray :%d)\n",
-				cfg.Server.RemotePort, cfg.Server.SSHPort, xrayListenPort)
-			if err := rt.Run(); err != nil {
-				fmt.Printf("Reverse tunnel error: %v\n", err)
-			}
-		}()
-		defer rt.Stop()
-	}
-
-	// Start gRPC API server (blocking).
-	apiAddr := fmt.Sprintf(":%d", cfg.Server.APIPort)
-	fmt.Printf("gRPC API on %s\n", apiAddr)
-	apiServer := api.NewServer(svc, apiAddr)
-	return apiServer.Run()
-}
-
-// ensureKeys generates SSH keys and seeds authorized_keys if they don't exist.
-func ensureKeys(cfg *config.Config) error {
-	if err := os.MkdirAll(config.Dir(), 0755); err != nil {
-		return fmt.Errorf("creating config directory: %w", err)
-	}
-
-	privPath := filepath.Join(config.Dir(), "id_ed25519")
-	pubPath := filepath.Join(config.Dir(), "id_ed25519.pub")
-
-	if _, err := os.Stat(privPath); err == nil {
-		return nil // keys already exist
-	}
-
-	fmt.Println("Generating ed25519 SSH key pair...")
-	privPEM, pubAuthorized, err := twssh.GenerateKeyPair()
-	if err != nil {
-		return fmt.Errorf("generating SSH key pair: %w", err)
-	}
-	if err := os.WriteFile(privPath, privPEM, 0600); err != nil {
-		return fmt.Errorf("writing private key: %w", err)
-	}
-	if err := os.WriteFile(pubPath, pubAuthorized, 0644); err != nil {
-		return fmt.Errorf("writing public key: %w", err)
-	}
-	fmt.Printf("Keys written to %s\n", config.Dir())
-
-	// Seed authorized_keys with the generated public key.
-	akPath := config.AuthorizedKeysPath()
-	if _, err := os.Stat(akPath); os.IsNotExist(err) {
-		if err := os.WriteFile(akPath, pubAuthorized, 0600); err != nil {
-			return fmt.Errorf("writing authorized_keys: %w", err)
-		}
-		fmt.Printf("authorized_keys seeded at %s\n", akPath)
-	}
-
-	// Save default config if none exists.
-	if _, err := os.Stat(config.FilePath()); os.IsNotExist(err) {
-		if err := config.Save(cfg); err != nil {
-			fmt.Printf("Warning: could not save default config: %v\n", err)
-		} else {
-			fmt.Printf("Default config written to %s\n", config.FilePath())
-		}
-	}
-
+	fmt.Println("\nShutting down...")
+	o.StopServer(nil)
 	return nil
 }

@@ -1,0 +1,39 @@
+{{define "content"}}
+<h1>Users</h1>
+
+<div class="flex justify-between items-center mb-16">
+  <p class="text-dim">{{len .Users}} user{{if ne (len .Users) 1}}s{{end}} configured</p>
+  <a href="/users/new" class="btn btn-primary">Create User</a>
+</div>
+
+{{if .Users}}
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>UUID</th>
+        <th>Tunnels</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Users}}
+      <tr>
+        <td><a href="/users/{{.Name}}">{{.Name}}</a></td>
+        <td class="text-mono text-dim">{{if .UUID}}{{slice .UUID 0 8}}...{{else}}—{{end}}</td>
+        <td>{{len .Tunnels}}</td>
+        <td>
+          <a href="/users/{{.Name}}" class="btn btn-sm">View</a>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{else}}
+<div class="card">
+  <p class="text-dim">No users yet. Create one to grant tunnel access.</p>
+</div>
+{{end}}
+{{end}}

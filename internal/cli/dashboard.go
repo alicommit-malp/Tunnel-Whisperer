@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tunnelwhisperer/tw/internal/config"
 	"github.com/tunnelwhisperer/tw/internal/dashboard"
+	"github.com/tunnelwhisperer/tw/internal/ops"
 )
 
 var dashboardPort int
@@ -27,6 +28,11 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
+	o, err := ops.New()
+	if err != nil {
+		return fmt.Errorf("initializing ops: %w", err)
+	}
+
 	port := cfg.Server.DashboardPort
 	if dashboardPort != 0 {
 		port = dashboardPort
@@ -34,6 +40,6 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 
 	addr := fmt.Sprintf(":%d", port)
 	fmt.Printf("Starting dashboard on http://localhost%s\n", addr)
-	srv := dashboard.NewServer(addr)
+	srv := dashboard.NewServer(addr, o)
 	return srv.Run()
 }

@@ -1,0 +1,88 @@
+{{define "content"}}
+<h1>Provision Relay Server</h1>
+
+<div class="wizard-steps" id="wizard-steps">
+  <div class="wizard-step active" data-step="1">Domain</div>
+  <div class="wizard-step" data-step="2">Provider</div>
+  <div class="wizard-step" data-step="3">Credentials</div>
+  <div class="wizard-step" data-step="4">Confirm</div>
+  <div class="wizard-step" data-step="5">Provisioning</div>
+</div>
+
+<!-- Step 1: Domain -->
+<div class="wizard-panel active" id="step-1">
+  <div class="card">
+    <h2>Relay Domain</h2>
+    <p class="text-dim mb-16">Enter the domain that will point to your relay server.</p>
+    <div class="form-group">
+      <label for="domain">Domain</label>
+      <input type="text" id="domain" placeholder="relay.example.com" value="{{.Config.Xray.RelayHost}}">
+    </div>
+    <button class="btn btn-primary" onclick="wizardNext(2)">Next</button>
+  </div>
+</div>
+
+<!-- Step 2: Provider -->
+<div class="wizard-panel" id="step-2">
+  <div class="card">
+    <h2>Cloud Provider</h2>
+    <p class="text-dim mb-16">Select a cloud provider for the relay VM.</p>
+    <div id="provider-list"></div>
+    <div class="mt-16 flex gap-8">
+      <button class="btn" onclick="wizardBack(1)">Back</button>
+    </div>
+  </div>
+</div>
+
+<!-- Step 3: Credentials -->
+<div class="wizard-panel" id="step-3">
+  <div class="card">
+    <h2>Cloud Credentials</h2>
+    <p class="text-dim mb-16" id="cred-help"></p>
+    <div id="cred-fields"></div>
+    <div id="cred-test-result" class="hidden mt-16"></div>
+    <div class="mt-16 flex gap-8">
+      <button class="btn" onclick="wizardBack(2)">Back</button>
+      <button class="btn btn-primary" id="btn-test-creds" onclick="testCreds()">Test & Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- Step 4: Confirm -->
+<div class="wizard-panel" id="step-4">
+  <div class="card">
+    <h2>Confirm</h2>
+    <div class="kv mb-16" id="confirm-details"></div>
+    <div class="alert alert-info">
+      This will create a VM with Ubuntu 24.04, Caddy, Xray, and SSH (localhost-only). Firewall allows ports 80 and 443 only.
+    </div>
+    <div class="mt-16 flex gap-8">
+      <button class="btn" onclick="wizardBack(3)">Back</button>
+      <button class="btn btn-primary" id="btn-provision" onclick="startProvision()">Provision</button>
+    </div>
+  </div>
+</div>
+
+<!-- Step 5: Provisioning -->
+<div class="wizard-panel" id="step-5">
+  <div class="card">
+    <h2>Provisioning</h2>
+    <div class="progress-log" id="provision-progress"></div>
+    <div id="provision-done" class="hidden mt-16">
+      <div class="alert alert-success">Relay provisioned successfully.</div>
+      <a href="/relay" class="btn btn-primary">View Relay</a>
+    </div>
+    <div id="provision-error" class="hidden mt-16">
+      <div class="alert alert-error" id="provision-error-msg"></div>
+      <button class="btn" onclick="wizardBack(3)">Back</button>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+  var providers = {{.ProvidersJSON}};
+</script>
+<script src="/static/js/relay.js"></script>
+{{end}}

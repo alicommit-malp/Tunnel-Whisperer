@@ -11,6 +11,7 @@ import (
 
 // Config holds all Tunnel Whisperer settings.
 type Config struct {
+	Mode   string       `yaml:"mode,omitempty"` // "server" or "client"
 	Xray   XrayConfig   `yaml:"xray"`
 	Server ServerConfig `yaml:"server"`
 	Client ClientConfig `yaml:"client"`

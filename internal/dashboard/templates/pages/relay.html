@@ -1,0 +1,39 @@
+{{define "content"}}
+<h1>Relay</h1>
+
+{{if .Relay.Provisioned}}
+<div class="card">
+  <div class="card-header">
+    <h2>Relay Status</h2>
+    <span class="badge badge-green">provisioned</span>
+  </div>
+  <div class="kv">
+    <span class="kv-label">Domain</span>
+    <span class="kv-value">{{.Relay.Domain}}</span>
+    <span class="kv-label">IP</span>
+    <span class="kv-value">{{or .Relay.IP "—"}}</span>
+    <span class="kv-label">Provider</span>
+    <span class="kv-value">{{or .Relay.Provider "—"}}</span>
+  </div>
+  <div class="mt-16 flex gap-8">
+    <button class="btn btn-danger" id="btn-destroy" onclick="destroyRelay()">Destroy Relay</button>
+  </div>
+</div>
+
+<div id="destroy-progress" class="progress-log hidden"></div>
+{{else}}
+<div class="card">
+  <div class="card-header">
+    <h2>No Relay Provisioned</h2>
+  </div>
+  <p class="text-dim">A relay server is required to create tunnels through firewalls.</p>
+  <div class="mt-16">
+    <a href="/relay/wizard" class="btn btn-primary">Provision Relay</a>
+  </div>
+</div>
+{{end}}
+{{end}}
+
+{{define "scripts"}}
+<script src="/static/js/relay.js"></script>
+{{end}}
