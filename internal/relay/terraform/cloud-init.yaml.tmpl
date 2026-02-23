@@ -1,0 +1,82 @@
+#cloud-config
+
+users:
+  - default
+  - name: {{.SSHUser}}
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - {{.PublicKey}}
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - debian-keyring
+  - debian-archive-keyring
+  - apt-transport-https
+  - curl
+  - ufw
+  - unzip
+
+write_files:
+  - path: /usr/local/etc/xray/config.json
+    permissions: "0644"
+    content: |
+      {
+        "log": { "loglevel": "warning" },
+        "inbounds": [
+          {
+            "tag": "vless-in",
+            "listen": "127.0.0.1",
+            "port": 10000,
+            "protocol": "vless",
+            "settings": {
+              "clients": [{ "id": "{{.UUID}}" }],
+              "decryption": "none"
+            },
+            "streamSettings": {
+              "network": "splithttp",
+              "splithttpSettings": { "path": "{{.XrayPath}}" }
+            }
+          }
+        ],
+        "outbounds": [
+          { "tag": "freedom", "protocol": "freedom" }
+        ]
+      }
+
+  - path: /etc/ssh/sshd_config.d/99-tw-localhost.conf
+    permissions: "0644"
+    content: |
+      ListenAddress 127.0.0.1
+      PasswordAuthentication no
+
+runcmd:
+  # Install Caddy
+  - curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  - curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+  - apt-get update
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y caddy
+
+  # Write Caddyfile after installation to avoid dpkg conffile prompt
+  - |
+    cat > /etc/caddy/Caddyfile <<'CADDYEOF'
+    {{.Domain}} {
+        reverse_proxy {{.XrayPath}}* 127.0.0.1:10000
+    }
+    CADDYEOF
+
+  # Install Xray
+  - bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+
+  # Firewall — only 80 and 443
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw --force enable
+
+  # Restart services (Ubuntu 24.04 uses 'ssh' not 'sshd')
+  - systemctl restart ssh
+  - systemctl enable --now xray
+  - systemctl restart caddy

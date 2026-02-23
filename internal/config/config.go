@@ -91,6 +91,11 @@ func FilePath() string {
 	return filepath.Join(Dir(), "config.yaml")
 }
 
+// RelayDir returns the path to the relay Terraform directory.
+func RelayDir() string {
+	return filepath.Join(Dir(), "relay")
+}
+
 // HostKeyDir returns the directory for SSH host keys (same as config dir).
 func HostKeyDir() string {
 	return Dir()

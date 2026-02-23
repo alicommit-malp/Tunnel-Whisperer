@@ -6,7 +6,7 @@ import (
 	"text/template"
 )
 
-//go:embed ../../../../deploy/caddy/Caddyfile.tmpl
+//go:embed Caddyfile.tmpl
 var caddyfileTmpl string
 
 // Config holds the values used to render a Caddyfile.

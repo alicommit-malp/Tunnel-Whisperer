@@ -6,7 +6,7 @@ import (
 	"text/template"
 )
 
-//go:embed ../../../../deploy/xray/config.json.tmpl
+//go:embed config.json.tmpl
 var xrayConfigTmpl string
 
 // Config holds the values used to render an Xray config.
