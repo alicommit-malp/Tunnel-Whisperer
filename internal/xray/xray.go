@@ -3,9 +3,10 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/tunnelwhisperer/tw/internal/config"
+	"github.com/tunnelwhisperer/tw/internal/logging"
 	"github.com/xtls/xray-core/core"
 	_ "github.com/xtls/xray-core/main/distro/all"
 )
@@ -73,7 +74,7 @@ func buildServerConfig(cfg config.XrayConfig, sshPort, relaySSHPort int) ([]byte
 	listenPort := sshPort + 1
 
 	xc := xrayConfig{
-		Log: xrayLog{LogLevel: "warning"},
+		Log: xrayLog{LogLevel: logging.XrayLevel},
 		Inbounds: []interface{}{
 			map[string]interface{}{
 				"tag":      "ssh-in",
@@ -98,7 +99,7 @@ func buildServerConfig(cfg config.XrayConfig, sshPort, relaySSHPort int) ([]byte
 // port on the relay (exposed via reverse tunnel).
 func buildClientConfig(cfg config.XrayConfig, clientCfg config.ClientConfig) ([]byte, error) {
 	xc := xrayConfig{
-		Log: xrayLog{LogLevel: "warning"},
+		Log: xrayLog{LogLevel: logging.XrayLevel},
 		Inbounds: []interface{}{
 			map[string]interface{}{
 				"tag":      "ssh-local",
@@ -146,7 +147,7 @@ func (x *Instance) Start(sshPort, relaySSHPort int) error {
 		return fmt.Errorf("xray: building config: %w", err)
 	}
 
-	log.Printf("xray: starting instance (relay=%s:%d, path=%s)", x.cfg.RelayHost, x.cfg.RelayPort, x.cfg.Path)
+	slog.Info("Xray starting", "relay", fmt.Sprintf("%s:%d", x.cfg.RelayHost, x.cfg.RelayPort), "path", x.cfg.Path, "xray_log_level", logging.XrayLevel)
 
 	instance, err := core.StartInstance("json", configBytes)
 	if err != nil {
@@ -154,7 +155,7 @@ func (x *Instance) Start(sshPort, relaySSHPort int) error {
 	}
 
 	x.instance = instance
-	log.Println("xray: instance started successfully")
+	slog.Info("Xray instance started")
 	return nil
 }
 
@@ -177,7 +178,7 @@ func (x *Instance) StartClient(clientCfg config.ClientConfig) error {
 		return fmt.Errorf("xray: building client config: %w", err)
 	}
 
-	log.Printf("xray: starting client instance (relay=%s:%d, path=%s)", x.cfg.RelayHost, x.cfg.RelayPort, x.cfg.Path)
+	slog.Info("Xray client starting", "relay", fmt.Sprintf("%s:%d", x.cfg.RelayHost, x.cfg.RelayPort), "path", x.cfg.Path, "xray_log_level", logging.XrayLevel)
 
 	instance, err := core.StartInstance("json", configBytes)
 	if err != nil {
@@ -185,7 +186,7 @@ func (x *Instance) StartClient(clientCfg config.ClientConfig) error {
 	}
 
 	x.instance = instance
-	log.Println("xray: client instance started successfully")
+	slog.Info("Xray client instance started")
 	return nil
 }
 

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -50,7 +50,7 @@ func NewServer(port int, hostKeyDir, authorizedKeys string) (*Server, error) {
 func (s *Server) loadAuthorizedKeys() error {
 	if _, err := os.Stat(s.AuthorizedKeys); err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("ssh-server: no authorized_keys file at %s — clients can connect once it is created", s.AuthorizedKeys)
+			slog.Warn("no authorized_keys file, clients can connect once it is created", "path", s.AuthorizedKeys)
 		}
 	}
 
@@ -83,7 +83,7 @@ func (s *Server) checkAuthorizedKey(conn gossh.ConnMetadata, key gossh.PublicKey
 			continue
 		}
 
-		log.Printf("ssh-server: authenticated user %q from %s", conn.User(), conn.RemoteAddr())
+		slog.Info("client authenticated", "user", conn.User(), "remote", conn.RemoteAddr())
 
 		perms := &gossh.Permissions{
 			Extensions: map[string]string{},
@@ -119,7 +119,7 @@ func (s *Server) loadOrGenerateHostKey() error {
 			return fmt.Errorf("reading host key: %w", err)
 		}
 
-		log.Println("ssh-server: generating host key...")
+		slog.Info("generating SSH host key", "path", keyPath)
 		if err := os.MkdirAll(s.HostKeyDir, 0700); err != nil {
 			return fmt.Errorf("creating host key directory: %w", err)
 		}
@@ -153,18 +153,18 @@ func (s *Server) Run() error {
 	}
 	s.listener = lis
 
-	log.Printf("ssh-server: listening on %s", addr)
+	slog.Info("SSH server listening", "addr", addr)
 
 	for {
 		conn, err := lis.Accept()
 		if err != nil {
 			// If the listener was closed (Stop was called), exit cleanly.
 			if errors.Is(err, net.ErrClosed) {
-				log.Println("ssh-server: listener closed, shutting down")
+				slog.Info("SSH server listener closed, shutting down")
 				return nil
 			}
 			// Transient error — log and keep accepting.
-			log.Printf("ssh-server: accept error (continuing): %v", err)
+			slog.Warn("SSH server accept error, continuing", "error", err)
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
@@ -183,18 +183,18 @@ func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("ssh-server: panic in connection handler: %v", r)
+			slog.Error("panic in SSH connection handler", "error", r)
 		}
 	}()
 
 	sshConn, chans, reqs, err := gossh.NewServerConn(conn, s.config)
 	if err != nil {
-		log.Printf("ssh-server: handshake failed: %v", err)
+		slog.Warn("SSH handshake failed", "error", err)
 		return
 	}
 	defer sshConn.Close()
 
-	log.Printf("ssh-server: connection from %s (%s) user=%s", sshConn.RemoteAddr(), sshConn.ClientVersion(), sshConn.User())
+	slog.Debug("SSH connection established", "remote", sshConn.RemoteAddr(), "client_version", sshConn.ClientVersion(), "user", sshConn.User())
 
 	go gossh.DiscardRequests(reqs)
 
@@ -207,7 +207,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 	}
 
-	log.Printf("ssh-server: connection closed from %s", sshConn.RemoteAddr())
+	slog.Debug("SSH connection closed", "remote", sshConn.RemoteAddr())
 }
 
 // directTCPIPData matches the RFC 4254 §7.2 payload for direct-tcpip channels.
@@ -248,7 +248,7 @@ func parseDirectTCPIP(data []byte) (directTCPIPData, error) {
 func (s *Server) handleDirectTCPIP(newChan gossh.NewChannel, perms *gossh.Permissions) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("ssh-server: panic in direct-tcpip handler: %v", r)
+			slog.Error("panic in direct-tcpip handler", "error", r)
 		}
 	}()
 
@@ -262,12 +262,12 @@ func (s *Server) handleDirectTCPIP(newChan gossh.NewChannel, perms *gossh.Permis
 
 	// Check port forwarding restrictions from authorized_keys permitopen options.
 	if !isPortAllowed(perms, d.DestHost, d.DestPort) {
-		log.Printf("ssh-server: direct-tcpip DENIED %s:%d → %s (not in permitopen)", d.OriginHost, d.OriginPort, dest)
+		slog.Warn("direct-tcpip denied, not in permitopen", "origin", fmt.Sprintf("%s:%d", d.OriginHost, d.OriginPort), "dest", dest)
 		newChan.Reject(gossh.Prohibited, "port forwarding to this destination is not permitted")
 		return
 	}
 
-	log.Printf("ssh-server: direct-tcpip %s:%d → %s", d.OriginHost, d.OriginPort, dest)
+	slog.Debug("direct-tcpip forwarding", "origin", fmt.Sprintf("%s:%d", d.OriginHost, d.OriginPort), "dest", dest)
 
 	conn, err := net.DialTimeout("tcp", dest, 10*time.Second)
 	if err != nil {
@@ -284,7 +284,7 @@ func (s *Server) handleDirectTCPIP(newChan gossh.NewChannel, perms *gossh.Permis
 
 	ch, _, err := newChan.Accept()
 	if err != nil {
-		log.Printf("ssh-server: channel accept: %v", err)
+		slog.Warn("SSH channel accept failed", "error", err)
 		return
 	}
 	defer ch.Close()

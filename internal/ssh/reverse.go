@@ -3,7 +3,7 @@ package ssh
 import (
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"sync"
@@ -46,7 +46,7 @@ func (rt *ReverseTunnel) Run() error {
 
 		err := rt.connect()
 		if err != nil {
-			log.Printf("reverse-tunnel: connection failed: %v", err)
+			slog.Warn("reverse tunnel connection failed", "error", err)
 		} else {
 			// Successful connection resets backoff.
 			backoff = time.Second * 2
@@ -56,7 +56,7 @@ func (rt *ReverseTunnel) Run() error {
 		case <-rt.done:
 			return nil
 		case <-time.After(backoff):
-			log.Printf("reverse-tunnel: reconnecting (backoff %s)...", backoff)
+			slog.Info("reverse tunnel reconnecting", "backoff", backoff)
 		}
 
 		// Exponential backoff: 2s → 4s → 8s → 16s → 30s (max).
@@ -87,7 +87,7 @@ func (rt *ReverseTunnel) connect() error {
 		Timeout:         10 * time.Second,
 	}
 
-	log.Printf("reverse-tunnel: connecting to %s as %s", rt.RemoteAddr, rt.User)
+	slog.Debug("reverse tunnel connecting", "remote", rt.RemoteAddr, "user", rt.User)
 
 	conn, err := net.DialTimeout("tcp", rt.RemoteAddr, 10*time.Second)
 	if err != nil {
@@ -118,7 +118,7 @@ func (rt *ReverseTunnel) connect() error {
 	}
 	defer listener.Close()
 
-	log.Printf("reverse-tunnel: listening on relay :%d → %s", rt.RemotePort, rt.LocalAddr)
+	slog.Info("reverse tunnel active", "relay_port", rt.RemotePort, "local", rt.LocalAddr)
 
 	for {
 		remote, err := listener.Accept()
@@ -147,7 +147,7 @@ func (rt *ReverseTunnel) keepalive(conn gossh.Conn) {
 		case <-ticker.C:
 			_, _, err := conn.SendRequest("keepalive@tw", true, nil)
 			if err != nil {
-				log.Printf("reverse-tunnel: keepalive failed: %v", err)
+				slog.Warn("reverse tunnel keepalive failed", "error", err)
 				conn.Close()
 				return
 			}
@@ -158,14 +158,14 @@ func (rt *ReverseTunnel) keepalive(conn gossh.Conn) {
 func (rt *ReverseTunnel) forward(remote net.Conn) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("reverse-tunnel: panic in forward: %v", r)
+			slog.Error("panic in reverse tunnel forward", "error", r)
 		}
 	}()
 	defer remote.Close()
 
 	local, err := net.DialTimeout("tcp", rt.LocalAddr, 10*time.Second)
 	if err != nil {
-		log.Printf("reverse-tunnel: failed to connect to local %s: %v", rt.LocalAddr, err)
+		slog.Error("reverse tunnel failed to connect to local", "addr", rt.LocalAddr, "error", err)
 		return
 	}
 	defer local.Close()

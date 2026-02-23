@@ -1,7 +1,7 @@
 package api
 
 import (
-	"log"
+	"log/slog"
 	"net"
 
 	"github.com/tunnelwhisperer/tw/internal/core"
@@ -32,7 +32,7 @@ func (s *Server) Run() error {
 	if err != nil {
 		return err
 	}
-	log.Printf("grpc: listening on %s", s.addr)
+	slog.Info("gRPC server listening", "addr", s.addr)
 	return s.gs.Serve(lis)
 }
 

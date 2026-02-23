@@ -2,7 +2,7 @@ package ssh
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 )
 
 // Client manages SSH connections and port forwarding.
@@ -24,12 +24,12 @@ func NewClient(host string, port int, user string, privateKey []byte) *Client {
 
 // Connect establishes an SSH connection to the remote host.
 func (c *Client) Connect() error {
-	log.Printf("ssh: connecting to %s:%d as %s", c.Host, c.Port, c.User)
+	slog.Debug("SSH client connecting", "host", c.Host, "port", c.Port, "user", c.User)
 	return fmt.Errorf("ssh client: Connect not yet implemented")
 }
 
 // ReverseForward sets up reverse port forwarding (ssh -R).
 func (c *Client) ReverseForward(remotePort, localPort int) error {
-	log.Printf("ssh: reverse forward %d -> localhost:%d", remotePort, localPort)
+	slog.Debug("SSH reverse forward", "remote_port", remotePort, "local_port", localPort)
 	return fmt.Errorf("ssh client: ReverseForward not yet implemented")
 }

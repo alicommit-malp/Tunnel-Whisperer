@@ -2,7 +2,7 @@ package core
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/tunnelwhisperer/tw/internal/provider"
 )
@@ -21,13 +21,13 @@ func New(configDir string) *Service {
 
 // Init prepares the core service (loads config, validates state).
 func (s *Service) Init() error {
-	log.Printf("core: initialized with config dir %s", s.ConfigDir)
+	slog.Debug("core service initialized", "config_dir", s.ConfigDir)
 	return nil
 }
 
 // StartServer starts the core service loop (tunnel monitoring, relay health checks).
 func (s *Service) StartServer() error {
-	log.Println("core: server started")
+	slog.Info("core server started")
 	return nil
 }
 

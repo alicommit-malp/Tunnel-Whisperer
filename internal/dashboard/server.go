@@ -2,7 +2,7 @@ package dashboard
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 )
 
@@ -28,7 +28,7 @@ func (s *Server) routes() {
 
 // Run starts the HTTP server (blocking).
 func (s *Server) Run() error {
-	log.Printf("dashboard: listening on %s", s.addr)
+	slog.Info("dashboard listening", "addr", s.addr)
 	return http.ListenAndServe(s.addr, s.mux)
 }
 

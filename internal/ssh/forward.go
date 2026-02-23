@@ -3,7 +3,7 @@ package ssh
 import (
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"sync"
@@ -53,7 +53,7 @@ func (ft *ForwardTunnel) Run() error {
 
 		err := ft.connect()
 		if err != nil {
-			log.Printf("forward-tunnel: connection failed: %v", err)
+			slog.Warn("forward tunnel connection failed", "error", err)
 		} else {
 			backoff = time.Second * 2
 		}
@@ -65,7 +65,7 @@ func (ft *ForwardTunnel) Run() error {
 		case <-ft.done:
 			return nil
 		case <-time.After(backoff):
-			log.Printf("forward-tunnel: reconnecting (backoff %s)...", backoff)
+			slog.Info("forward tunnel reconnecting", "backoff", backoff)
 		}
 
 		// Exponential backoff: 2s → 4s → 8s → 16s → 30s (max).
@@ -113,7 +113,7 @@ func (ft *ForwardTunnel) connect() error {
 		Timeout:         10 * time.Second,
 	}
 
-	log.Printf("forward-tunnel: connecting to %s as %s", ft.RemoteAddr, ft.User)
+	slog.Debug("forward tunnel connecting", "remote", ft.RemoteAddr, "user", ft.User)
 
 	conn, err := net.DialTimeout("tcp", ft.RemoteAddr, 10*time.Second)
 	if err != nil {
@@ -158,7 +158,7 @@ func (ft *ForwardTunnel) connect() error {
 		ft.listeners = append(ft.listeners, listener)
 		ft.mu.Unlock()
 
-		log.Printf("forward-tunnel: localhost:%d → %s:%d (via SSH)", m.LocalPort, m.RemoteHost, m.RemotePort)
+		slog.Info("forward tunnel active", "local_port", m.LocalPort, "remote", fmt.Sprintf("%s:%d", m.RemoteHost, m.RemotePort))
 
 		wg.Add(1)
 		go func(l net.Listener, m Mapping) {
@@ -187,7 +187,7 @@ func (ft *ForwardTunnel) acceptLoop(listener net.Listener, m Mapping, done <-cha
 			case <-ft.done:
 			case <-done:
 			default:
-				log.Printf("forward-tunnel: accept error on :%d: %v", m.LocalPort, err)
+				slog.Warn("forward tunnel accept error", "port", m.LocalPort, "error", err)
 			}
 			return
 		}
@@ -210,7 +210,7 @@ func (ft *ForwardTunnel) keepalive(conn gossh.Conn) {
 		case <-ticker.C:
 			_, _, err := conn.SendRequest("keepalive@tw", true, nil)
 			if err != nil {
-				log.Printf("forward-tunnel: keepalive failed, triggering reconnect: %v", err)
+				slog.Warn("forward tunnel keepalive failed, triggering reconnect", "error", err)
 				// Close listeners first — this unblocks Accept() in all loops.
 				ft.mu.Lock()
 				for _, l := range ft.listeners {
@@ -227,7 +227,7 @@ func (ft *ForwardTunnel) keepalive(conn gossh.Conn) {
 func (ft *ForwardTunnel) forward(local net.Conn, m Mapping) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("forward-tunnel: panic in forward: %v", r)
+			slog.Error("panic in forward tunnel", "error", r)
 		}
 	}()
 	defer local.Close()
@@ -237,14 +237,14 @@ func (ft *ForwardTunnel) forward(local net.Conn, m Mapping) {
 	ft.mu.Unlock()
 
 	if client == nil {
-		log.Printf("forward-tunnel: no SSH client available")
+		slog.Error("forward tunnel has no SSH client")
 		return
 	}
 
 	remoteAddr := fmt.Sprintf("%s:%d", m.RemoteHost, m.RemotePort)
 	remote, err := client.Dial("tcp", remoteAddr)
 	if err != nil {
-		log.Printf("forward-tunnel: failed to dial %s via SSH: %v", remoteAddr, err)
+		slog.Error("forward tunnel dial failed", "remote", remoteAddr, "error", err)
 		return
 	}
 	defer remote.Close()
