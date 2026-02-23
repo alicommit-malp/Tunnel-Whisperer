@@ -96,6 +96,11 @@ func RelayDir() string {
 	return filepath.Join(Dir(), "relay")
 }
 
+// UsersDir returns the path to the directory containing per-user client configs.
+func UsersDir() string {
+	return filepath.Join(Dir(), "users")
+}
+
 // HostKeyDir returns the directory for SSH host keys (same as config dir).
 func HostKeyDir() string {
 	return Dir()

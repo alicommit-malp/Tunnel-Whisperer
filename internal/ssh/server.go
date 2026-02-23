@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,45 +44,70 @@ func NewServer(port int, hostKeyDir, authorizedKeys string) (*Server, error) {
 	return s, nil
 }
 
+// loadAuthorizedKeys sets up dynamic public key authentication.
+// The authorized_keys file is re-read on each authentication attempt,
+// so adding or removing keys takes effect without restarting the server.
 func (s *Server) loadAuthorizedKeys() error {
-	data, err := os.ReadFile(s.AuthorizedKeys)
-	if err != nil {
+	if _, err := os.Stat(s.AuthorizedKeys); err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("ssh-server: no authorized_keys file at %s — no clients can connect until one is created", s.AuthorizedKeys)
-			s.config.NoClientAuth = false
-			s.config.PublicKeyCallback = func(conn gossh.ConnMetadata, key gossh.PublicKey) (*gossh.Permissions, error) {
-				return nil, fmt.Errorf("no authorized keys configured")
-			}
-			return nil
+			log.Printf("ssh-server: no authorized_keys file at %s — clients can connect once it is created", s.AuthorizedKeys)
 		}
-		return fmt.Errorf("reading authorized_keys: %w", err)
 	}
-
-	var allowed []gossh.PublicKey
-	rest := data
-	for len(rest) > 0 {
-		pub, _, _, r, err := gossh.ParseAuthorizedKey(rest)
-		if err != nil {
-			break
-		}
-		allowed = append(allowed, pub)
-		rest = r
-	}
-
-	log.Printf("ssh-server: loaded %d authorized key(s) from %s", len(allowed), s.AuthorizedKeys)
 
 	s.config.PublicKeyCallback = func(conn gossh.ConnMetadata, key gossh.PublicKey) (*gossh.Permissions, error) {
-		keyBytes := key.Marshal()
-		for _, ak := range allowed {
-			if string(ak.Marshal()) == string(keyBytes) {
-				log.Printf("ssh-server: authenticated user %q from %s", conn.User(), conn.RemoteAddr())
-				return &gossh.Permissions{}, nil
-			}
-		}
-		return nil, fmt.Errorf("unknown public key for %q", conn.User())
+		return s.checkAuthorizedKey(conn, key)
 	}
 
 	return nil
+}
+
+// checkAuthorizedKey reads the authorized_keys file and checks if the
+// given public key is allowed. It also parses permitopen options for
+// port forwarding restrictions.
+func (s *Server) checkAuthorizedKey(conn gossh.ConnMetadata, key gossh.PublicKey) (*gossh.Permissions, error) {
+	data, err := os.ReadFile(s.AuthorizedKeys)
+	if err != nil {
+		return nil, fmt.Errorf("reading authorized_keys: %w", err)
+	}
+
+	keyBytes := key.Marshal()
+	rest := data
+	for len(rest) > 0 {
+		pub, _, options, r, parseErr := gossh.ParseAuthorizedKey(rest)
+		if parseErr != nil {
+			break
+		}
+		rest = r
+
+		if string(pub.Marshal()) != string(keyBytes) {
+			continue
+		}
+
+		log.Printf("ssh-server: authenticated user %q from %s", conn.User(), conn.RemoteAddr())
+
+		perms := &gossh.Permissions{
+			Extensions: map[string]string{},
+		}
+
+		// Parse permitopen options for port forwarding restrictions.
+		var permitOpens []string
+		for _, opt := range options {
+			if strings.HasPrefix(opt, `permitopen="`) {
+				val := opt[len(`permitopen="`):]
+				if idx := strings.Index(val, `"`); idx >= 0 {
+					val = val[:idx]
+				}
+				permitOpens = append(permitOpens, val)
+			}
+		}
+		if len(permitOpens) > 0 {
+			perms.Extensions["permitopen"] = strings.Join(permitOpens, ",")
+		}
+
+		return perms, nil
+	}
+
+	return nil, fmt.Errorf("unknown public key for %q", conn.User())
 }
 
 func (s *Server) loadOrGenerateHostKey() error {
@@ -175,7 +201,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	for newChan := range chans {
 		switch newChan.ChannelType() {
 		case "direct-tcpip":
-			go s.handleDirectTCPIP(newChan)
+			go s.handleDirectTCPIP(newChan, sshConn.Permissions)
 		default:
 			newChan.Reject(gossh.UnknownChannelType, fmt.Sprintf("unsupported channel type: %s", newChan.ChannelType()))
 		}
@@ -219,7 +245,7 @@ func parseDirectTCPIP(data []byte) (directTCPIPData, error) {
 	return d, nil
 }
 
-func (s *Server) handleDirectTCPIP(newChan gossh.NewChannel) {
+func (s *Server) handleDirectTCPIP(newChan gossh.NewChannel, perms *gossh.Permissions) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("ssh-server: panic in direct-tcpip handler: %v", r)
@@ -233,6 +259,14 @@ func (s *Server) handleDirectTCPIP(newChan gossh.NewChannel) {
 	}
 
 	dest := net.JoinHostPort(d.DestHost, fmt.Sprintf("%d", d.DestPort))
+
+	// Check port forwarding restrictions from authorized_keys permitopen options.
+	if !isPortAllowed(perms, d.DestHost, d.DestPort) {
+		log.Printf("ssh-server: direct-tcpip DENIED %s:%d → %s (not in permitopen)", d.OriginHost, d.OriginPort, dest)
+		newChan.Reject(gossh.Prohibited, "port forwarding to this destination is not permitted")
+		return
+	}
+
 	log.Printf("ssh-server: direct-tcpip %s:%d → %s", d.OriginHost, d.OriginPort, dest)
 
 	conn, err := net.DialTimeout("tcp", dest, 10*time.Second)
@@ -274,6 +308,26 @@ func (s *Server) handleDirectTCPIP(newChan gossh.NewChannel) {
 	}()
 
 	wg.Wait()
+}
+
+// isPortAllowed checks whether a direct-tcpip destination is permitted
+// by the authorized_keys entry's permitopen options.
+// If no permitopen options are set, all destinations are allowed.
+func isPortAllowed(perms *gossh.Permissions, host string, port uint32) bool {
+	if perms == nil || perms.Extensions == nil {
+		return true
+	}
+	permitted, ok := perms.Extensions["permitopen"]
+	if !ok {
+		return true // No restrictions — allow all.
+	}
+	target := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+	for _, allowed := range strings.Split(permitted, ",") {
+		if allowed == target {
+			return true
+		}
+	}
+	return false
 }
 
 // Stop gracefully stops the SSH server.

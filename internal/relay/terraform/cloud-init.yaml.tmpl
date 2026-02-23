@@ -4,6 +4,7 @@ users:
   - default
   - name: {{.SSHUser}}
     shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
     ssh_authorized_keys:
       - {{.PublicKey}}
 
