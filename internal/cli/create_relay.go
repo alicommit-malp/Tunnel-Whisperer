@@ -101,7 +101,7 @@ func runCreateRelayServer(cmd *cobra.Command, args []string) error {
 	}
 
 	// ── Step 3: Relay Domain ────────────────────────────────────────────
-	fmt.Println("[3/8] Relay domain")
+	fmt.Println("[3/9] Relay domain")
 	if cfg.Xray.RelayHost != "" {
 		fmt.Printf("      Current: %s\n", cfg.Xray.RelayHost)
 		fmt.Print("      Keep? [Y/n]: ")
@@ -125,7 +125,7 @@ func runCreateRelayServer(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	// ── Step 4: Cloud Provider ──────────────────────────────────────────
-	fmt.Println("[4/8] Cloud provider")
+	fmt.Println("[4/9] Cloud provider")
 	providers := ops.CloudProviders()
 	for i, p := range providers {
 		fmt.Printf("      %d) %s\n", i+1, p.Name)
@@ -148,7 +148,7 @@ func runCreateRelayServer(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	// ── Step 5: Cloud Credentials ───────────────────────────────────────
-	fmt.Printf("[5/8] %s credentials\n", selected.Name)
+	fmt.Printf("[5/9] %s credentials\n", selected.Name)
 	fmt.Printf("      Generate here: %s\n", selected.TokenLink)
 	fmt.Println()
 
@@ -174,7 +174,7 @@ func runCreateRelayServer(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	// ── Step 7: Confirm ─────────────────────────────────────────────────
-	fmt.Println("[7/8] Provisioning relay")
+	fmt.Println("[7/9] Provisioning relay")
 	fmt.Printf("      Provider:  %s\n", selected.Name)
 	fmt.Printf("      Domain:    %s\n", domain)
 	fmt.Printf("      Instance:  Ubuntu 24.04 (smallest tier)\n")

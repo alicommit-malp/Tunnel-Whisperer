@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -9,7 +10,8 @@ import (
 )
 
 // RunTerraform executes a terraform command in dir with the given env vars.
-// Progress events are emitted via the callback if non-nil.
+// Output is streamed line-by-line as progress events so the dashboard shows
+// real-time feedback instead of blocking silently.
 func (o *Ops) RunTerraform(ctx context.Context, dir string, env map[string]string, progress ProgressFunc, args ...string) error {
 	cmd := exec.CommandContext(ctx, "terraform", args...)
 	cmd.Dir = dir
@@ -20,10 +22,40 @@ func (o *Ops) RunTerraform(ctx context.Context, dir string, env map[string]strin
 		}
 	}
 
-	// Capture combined output so we can report errors.
-	out, err := cmd.CombinedOutput()
+	// Pipe stdout+stderr so we can stream to progress.
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("terraform %s: %w\n%s", strings.Join(args, " "), err, string(out))
+		return fmt.Errorf("terraform %s: stdout pipe: %w", strings.Join(args, " "), err)
+	}
+	cmd.Stderr = cmd.Stdout // merge stderr into stdout
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("terraform %s: %w", strings.Join(args, " "), err)
+	}
+
+	// Stream output line-by-line.
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 256*1024), 256*1024)
+	var lastLines []string
+	for scanner.Scan() {
+		line := scanner.Text()
+		lastLines = append(lastLines, line)
+		// Keep only last 50 lines for error context.
+		if len(lastLines) > 50 {
+			lastLines = lastLines[len(lastLines)-50:]
+		}
+		if progress != nil {
+			progress(ProgressEvent{
+				Label:   "terraform " + args[0],
+				Status:  "running",
+				Message: line,
+			})
+		}
+	}
+
+	if err := cmd.Wait(); err != nil {
+		tail := strings.Join(lastLines, "\n")
+		return fmt.Errorf("terraform %s: %w\n%s", strings.Join(args, " "), err, tail)
 	}
 	return nil
 }

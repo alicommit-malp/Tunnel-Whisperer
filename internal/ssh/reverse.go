@@ -26,8 +26,25 @@ type ReverseTunnel struct {
 	// Local address to forward to (e.g. "127.0.0.1:2222").
 	LocalAddr string
 
-	client *gossh.Client
-	done   chan struct{}
+	mu        sync.Mutex
+	client    *gossh.Client
+	done      chan struct{}
+	connected bool
+	lastErr   string
+}
+
+// Connected reports whether the tunnel currently has an active SSH connection.
+func (rt *ReverseTunnel) Connected() bool {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.connected
+}
+
+// LastError returns the most recent connection error, or "" if connected.
+func (rt *ReverseTunnel) LastError() string {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.lastErr
 }
 
 // Run connects to the remote SSH server, sets up the reverse port
@@ -47,6 +64,10 @@ func (rt *ReverseTunnel) Run() error {
 		err := rt.connect()
 		if err != nil {
 			slog.Warn("reverse tunnel connection failed", "error", err)
+			rt.mu.Lock()
+			rt.connected = false
+			rt.lastErr = err.Error()
+			rt.mu.Unlock()
 		} else {
 			// Successful connection resets backoff.
 			backoff = time.Second * 2
@@ -117,6 +138,11 @@ func (rt *ReverseTunnel) connect() error {
 		return fmt.Errorf("requesting reverse forward on :%d: %w", rt.RemotePort, err)
 	}
 	defer listener.Close()
+
+	rt.mu.Lock()
+	rt.connected = true
+	rt.lastErr = ""
+	rt.mu.Unlock()
 
 	slog.Info("reverse tunnel active", "relay_port", rt.RemotePort, "local", rt.LocalAddr)
 
@@ -200,4 +226,7 @@ func (rt *ReverseTunnel) Stop() {
 	if rt.client != nil {
 		rt.client.Close()
 	}
+	rt.mu.Lock()
+	rt.connected = false
+	rt.mu.Unlock()
 }

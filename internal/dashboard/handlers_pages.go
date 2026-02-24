@@ -108,23 +108,36 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		slog.Error("listing users", "error", err)
 	}
 	mode := s.ops.Mode()
+	relay := s.ops.GetRelayStatus()
+	srvStatus := s.ops.ServerStatus()
 
 	data := struct {
 		pageData
-		Users []ops.UserInfo
+		Users         []ops.UserInfo
+		RelayReady    bool
+		ServerRunning bool
 	}{
-		pageData: pageData{Title: "Users", Active: "users", Mode: mode},
-		Users:    users,
+		pageData:      pageData{Title: "Users", Active: "users", Mode: mode},
+		Users:         users,
+		RelayReady:    relay.Provisioned,
+		ServerRunning: string(srvStatus.State) == "running",
 	}
 	s.renderPage(w, "users", data)
 }
 
 func (s *Server) handleUserNew(w http.ResponseWriter, r *http.Request) {
 	mode := s.ops.Mode()
+	relay := s.ops.GetRelayStatus()
+	srvStatus := s.ops.ServerStatus()
+
 	data := struct {
 		pageData
+		RelayReady    bool
+		ServerRunning bool
 	}{
-		pageData: pageData{Title: "Create User", Active: "users", Mode: mode},
+		pageData:      pageData{Title: "Create User", Active: "users", Mode: mode},
+		RelayReady:    relay.Provisioned,
+		ServerRunning: string(srvStatus.State) == "running",
 	}
 	s.renderPage(w, "user_new", data)
 }

@@ -67,15 +67,24 @@
 <div class="wizard-panel" id="step-5">
   <div class="card">
     <h2>Provisioning</h2>
+    <div id="relay-ip-banner" class="ip-banner hidden">
+      <span class="text-dim">Relay IP:</span>
+      <code id="relay-ip-value"></code>
+      <button class="btn btn-sm" onclick="copyRelayIP()" id="btn-copy-ip">Copy</button>
+    </div>
     <div class="progress-log" id="provision-progress"></div>
     <div id="provision-done" class="hidden mt-16">
       <div class="alert alert-success">Relay provisioned successfully.</div>
-      <a href="/relay" class="btn btn-primary">View Relay</a>
+      <div class="flex gap-8">
+        <a href="/relay" class="btn btn-primary">View Relay</a>
+        <button class="btn" onclick="testRelay()" id="btn-test-relay">Test Connectivity</button>
+      </div>
     </div>
     <div id="provision-error" class="hidden mt-16">
       <div class="alert alert-error" id="provision-error-msg"></div>
       <button class="btn" onclick="wizardBack(3)">Back</button>
     </div>
+    <div id="test-result" class="hidden mt-16"></div>
   </div>
 </div>
 {{end}}

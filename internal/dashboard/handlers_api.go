@@ -259,6 +259,21 @@ func (s *Server) apiDestroyRelay(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]string{"session_id": sessionID})
 }
 
+func (s *Server) apiTestRelay(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	sessionID, progress := s.sse.create()
+
+	go func() {
+		s.ops.TestRelay(progress)
+	}()
+
+	jsonOK(w, map[string]string{"session_id": sessionID})
+}
+
 // ── User endpoints ───────────────────────────────────────────────────────────
 
 func (s *Server) apiUsers(w http.ResponseWriter, r *http.Request) {

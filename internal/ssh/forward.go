@@ -35,6 +35,22 @@ type ForwardTunnel struct {
 	client    *gossh.Client
 	listeners []net.Listener
 	done      chan struct{}
+	connected bool
+	lastErr   string
+}
+
+// Connected reports whether the tunnel currently has an active SSH connection.
+func (ft *ForwardTunnel) Connected() bool {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+	return ft.connected
+}
+
+// LastError returns the most recent connection error, or "" if connected.
+func (ft *ForwardTunnel) LastError() string {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+	return ft.lastErr
 }
 
 // Run connects to the remote SSH server, starts all local listeners, and
@@ -54,6 +70,10 @@ func (ft *ForwardTunnel) Run() error {
 		err := ft.connect()
 		if err != nil {
 			slog.Warn("forward tunnel connection failed", "error", err)
+			ft.mu.Lock()
+			ft.connected = false
+			ft.lastErr = err.Error()
+			ft.mu.Unlock()
 		} else {
 			backoff = time.Second * 2
 		}
@@ -91,6 +111,8 @@ func (ft *ForwardTunnel) cleanup() {
 		ft.client.Close()
 		ft.client = nil
 	}
+
+	ft.connected = false
 }
 
 func (ft *ForwardTunnel) connect() error {
@@ -166,6 +188,11 @@ func (ft *ForwardTunnel) connect() error {
 			ft.acceptLoop(l, m, acceptDone)
 		}(listener, m)
 	}
+
+	ft.mu.Lock()
+	ft.connected = true
+	ft.lastErr = ""
+	ft.mu.Unlock()
 
 	// Block until all accept loops finish (triggered by keepalive failure or Stop).
 	wg.Wait()

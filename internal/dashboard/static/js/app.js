@@ -56,19 +56,27 @@ function connectSSE(sessionID, onEvent, onDone) {
 // ── Progress log renderer ───────────────────────────────────────────────────
 
 function renderProgressEvent(container, event) {
-  // Find or create the step element.
-  let el = container.querySelector(`[data-step="${event.step}"]`);
-  if (!el) {
-    el = document.createElement('div');
-    el.className = 'progress-step';
-    el.dataset.step = event.step;
-    el.innerHTML = `<span class="step-num">[${event.step}/${event.total}]</span><span class="step-label"></span><span class="step-msg"></span>`;
+  // Structured step events (step > 0 with total) update in-place per step.
+  // Streaming events (step === 0 or no total) append as log lines.
+  if (event.step > 0 && event.total > 0) {
+    let el = container.querySelector(`[data-step="${event.step}"]`);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'progress-step';
+      el.dataset.step = event.step;
+      el.innerHTML = `<span class="step-num">[${event.step}/${event.total}]</span><span class="step-label"></span><span class="step-msg"></span>`;
+      container.appendChild(el);
+    }
+    el.className = `progress-step ${event.status}`;
+    el.querySelector('.step-label').textContent = event.label;
+    el.querySelector('.step-msg').textContent = event.message || event.error || '';
+  } else {
+    // Streaming log line — always append.
+    const el = document.createElement('div');
+    el.className = 'progress-line';
+    el.textContent = event.message || event.label || event.error || '';
     container.appendChild(el);
   }
-
-  el.className = `progress-step ${event.status}`;
-  el.querySelector('.step-label').textContent = event.label;
-  el.querySelector('.step-msg').textContent = event.message || event.error || '';
 
   // Auto-scroll.
   container.scrollTop = container.scrollHeight;

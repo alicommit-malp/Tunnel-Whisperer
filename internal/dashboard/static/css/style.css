@@ -172,6 +172,36 @@ input:focus, select:focus { outline: none; border-color: var(--accent); box-shad
 .progress-step.completed .step-label { color: var(--green); }
 .progress-step.failed .step-label { color: var(--red); }
 .progress-step .step-msg { color: var(--text-dim); margin-left: 8px; }
+.progress-line { color: var(--text-dim); white-space: pre-wrap; word-break: break-all; }
+
+/* ── IP banner ───────────────────────────────────────────────────────── */
+.ip-banner {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  margin-bottom: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 14px;
+}
+
+.ip-banner code {
+  color: var(--accent);
+  font-weight: 600;
+  user-select: all;
+}
+
+code.copyable {
+  color: var(--accent);
+  cursor: pointer;
+  user-select: all;
+}
 
 /* ── Code / pre ──────────────────────────────────────────────────────── */
 pre, code { font-family: var(--mono); font-size: 13px; }

@@ -1,6 +1,11 @@
 {{define "content"}}
 <h1>Create User</h1>
 
+{{if not .RelayReady}}
+<div class="alert alert-info">Provision a relay before creating users. <a href="/relay/wizard">Provision Relay</a></div>
+{{else if not .ServerRunning}}
+<div class="alert alert-info">Start the server before creating users. <a href="/">Go to Status</a></div>
+{{else}}
 <div id="user-form">
   <div class="card">
     <h2>User Details</h2>
@@ -47,6 +52,7 @@
     </div>
   </div>
 </div>
+{{end}}
 {{end}}
 
 {{define "scripts"}}

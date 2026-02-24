@@ -25,6 +25,10 @@ write_files:
     content: |
       {
         "log": { "loglevel": "warning" },
+        "api": {
+          "tag": "api",
+          "services": ["HandlerService"]
+        },
         "inbounds": [
           {
             "tag": "vless-in",
@@ -32,18 +36,30 @@ write_files:
             "port": 10000,
             "protocol": "vless",
             "settings": {
-              "clients": [{ "id": "{{.UUID}}" }],
+              "clients": [{ "id": "{{.UUID}}", "email": "{{.UUID}}" }],
               "decryption": "none"
             },
             "streamSettings": {
               "network": "splithttp",
               "splithttpSettings": { "path": "{{.XrayPath}}" }
             }
+          },
+          {
+            "tag": "api-in",
+            "listen": "127.0.0.1",
+            "port": 10085,
+            "protocol": "dokodemo-door",
+            "settings": { "address": "127.0.0.1" }
           }
         ],
         "outbounds": [
           { "tag": "freedom", "protocol": "freedom" }
-        ]
+        ],
+        "routing": {
+          "rules": [
+            { "type": "field", "inboundTag": ["api-in"], "outboundTag": "api" }
+          ]
+        }
       }
 
   - path: /etc/ssh/sshd_config.d/99-tw-localhost.conf

@@ -16,12 +16,13 @@ import (
 
 // ServerStatus describes the server lifecycle state.
 type ServerStatus struct {
-	State  ServerState `json:"state"`
-	SSH    bool        `json:"ssh"`
-	Xray   bool        `json:"xray"`
-	Tunnel bool        `json:"tunnel"`
-	API    bool        `json:"api"`
-	Error  string      `json:"error,omitempty"`
+	State       ServerState `json:"state"`
+	SSH         bool        `json:"ssh"`
+	Xray        bool        `json:"xray"`
+	Tunnel      bool        `json:"tunnel"`
+	API         bool        `json:"api"`
+	Error       string      `json:"error,omitempty"`
+	TunnelError string      `json:"tunnel_error,omitempty"`
 }
 
 // serverManager controls the lifecycle of all server components.
@@ -258,16 +259,28 @@ func (m *serverManager) Stop(progress ProgressFunc) error {
 	return nil
 }
 
-// Status returns the current server state.
+// Status returns the current server state with real health checks.
 func (m *serverManager) Status() ServerStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return ServerStatus{
-		State:  m.state,
-		SSH:    m.sshSrv != nil,
-		Xray:   m.xrayInst != nil,
-		Tunnel: m.tunnel != nil,
-		API:    m.apiSrv != nil,
-		Error:  m.lastErr,
+
+	s := ServerStatus{
+		State: m.state,
+		SSH:   m.sshSrv != nil,
+		API:   m.apiSrv != nil,
+		Error: m.lastErr,
 	}
+
+	// Xray: check if the instance is actually running, not just allocated.
+	if m.xrayInst != nil {
+		s.Xray = m.xrayInst.Running()
+	}
+
+	// Tunnel: check real connection state, not just pointer existence.
+	if m.tunnel != nil {
+		s.Tunnel = m.tunnel.Connected()
+		s.TunnelError = m.tunnel.LastError()
+	}
+
+	return s
 }

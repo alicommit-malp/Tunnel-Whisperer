@@ -17,11 +17,14 @@
     <span class="kv-label">Xray</span>
     <span class="kv-value" data-bind="srv-xray">{{if .ServerStatus.Xray}}up{{else}}down{{end}}</span>
     <span class="kv-label">Reverse Tunnel</span>
-    <span class="kv-value" data-bind="srv-tunnel">{{if .ServerStatus.Tunnel}}up{{else}}down{{end}}</span>
+    <span class="kv-value" data-bind="srv-tunnel">{{if .ServerStatus.Tunnel}}up{{else if .ServerStatus.TunnelError}}error{{else}}down{{end}}</span>
     <span class="kv-label">gRPC API</span>
     <span class="kv-value" data-bind="srv-api">{{if .ServerStatus.API}}up{{else}}down{{end}}</span>
   </div>
 
+  {{if .ServerStatus.TunnelError}}
+  <div class="alert alert-error mt-16" data-bind="srv-tunnel-error">Tunnel: {{.ServerStatus.TunnelError}}</div>
+  {{end}}
   {{if .ServerStatus.Error}}
   <div class="alert alert-error mt-16" data-bind="srv-error">{{.ServerStatus.Error}}</div>
   {{end}}
@@ -113,13 +116,16 @@
     <span class="kv-label">Xray</span>
     <span class="kv-value" data-bind="cli-xray">{{if .ClientStatus.Xray}}up{{else}}down{{end}}</span>
     <span class="kv-label">Tunnel</span>
-    <span class="kv-value" data-bind="cli-tunnel">{{if .ClientStatus.Tunnel}}up{{else}}down{{end}}</span>
+    <span class="kv-value" data-bind="cli-tunnel">{{if .ClientStatus.Tunnel}}up{{else if .ClientStatus.TunnelError}}error{{else}}down{{end}}</span>
     {{range .Config.Client.Tunnels}}
     <span class="kv-label">Forward</span>
     <span class="kv-value">localhost:{{.LocalPort}} &rarr; {{.RemoteHost}}:{{.RemotePort}}</span>
     {{end}}
   </div>
 
+  {{if .ClientStatus.TunnelError}}
+  <div class="alert alert-error mt-16" data-bind="cli-tunnel-error">Tunnel: {{.ClientStatus.TunnelError}}</div>
+  {{end}}
   {{if .ClientStatus.Error}}
   <div class="alert alert-error mt-16" data-bind="cli-error">{{.ClientStatus.Error}}</div>
   {{end}}

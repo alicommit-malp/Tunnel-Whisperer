@@ -142,6 +142,15 @@ async function startProvision() {
     const log = $('#provision-progress');
     connectSSE(resp.session_id, (event) => {
       renderProgressEvent(log, event);
+      // Show sticky IP banner when step 7 completes with relay IP.
+      if (event.step === 7 && event.status === 'completed' && event.data) {
+        const banner = $('#relay-ip-banner');
+        const ipVal = $('#relay-ip-value');
+        if (banner && ipVal) {
+          ipVal.textContent = event.data;
+          banner.classList.remove('hidden');
+        }
+      }
     }, (err) => {
       if (err) {
         $('#provision-error-msg').textContent = err.message;
@@ -158,18 +167,51 @@ async function startProvision() {
 
 // ── Destroy ─────────────────────────────────────────────────────────────────
 
-async function destroyRelay() {
+function showDestroyPrompt() {
   if (!confirm('Are you sure you want to destroy the relay? This cannot be undone.')) return;
 
+  // AWS needs credentials re-entered; other providers have them in terraform.tfvars.
+  if (typeof relayProvider !== 'undefined' && relayProvider === 'AWS') {
+    const panel = $('#destroy-creds');
+    if (panel) panel.classList.remove('hidden');
+    const btn = $('#btn-destroy');
+    if (btn) btn.classList.add('hidden');
+  } else {
+    destroyRelay();
+  }
+}
+
+function hideDestroyPrompt() {
+  const panel = $('#destroy-creds');
+  if (panel) panel.classList.add('hidden');
   const btn = $('#btn-destroy');
-  btn.disabled = true;
+  if (btn) btn.classList.remove('hidden');
+}
+
+async function destroyRelay() {
+  const btn = $('#btn-destroy-confirm') || $('#btn-destroy');
+  if (btn) btn.disabled = true;
+
+  const credsPanel = $('#destroy-creds');
+  if (credsPanel) credsPanel.classList.add('hidden');
 
   const log = $('#destroy-progress');
   log.classList.remove('hidden');
   log.innerHTML = '';
 
+  // Collect AWS creds if provided.
+  let creds = null;
+  const keyEl = $('#destroy-aws-key');
+  const secretEl = $('#destroy-aws-secret');
+  if (keyEl && secretEl && keyEl.value.trim() && secretEl.value.trim()) {
+    creds = {
+      'AWS_ACCESS_KEY_ID': keyEl.value.trim(),
+      'AWS_SECRET_ACCESS_KEY': secretEl.value.trim(),
+    };
+  }
+
   try {
-    const resp = await api.post('/api/relay/destroy', {});
+    const resp = await api.post('/api/relay/destroy', { creds });
     connectSSE(resp.session_id, (event) => {
       renderProgressEvent(log, event);
     }, (err) => {
@@ -181,6 +223,49 @@ async function destroyRelay() {
     });
   } catch (err) {
     log.innerHTML = `<div class="progress-step failed"><span class="step-label">Error: ${err.message}</span></div>`;
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ── Copy relay IP ────────────────────────────────────────────────────────────
+
+function copyRelayIP() {
+  const ip = $('#relay-ip-value');
+  if (!ip) return;
+  navigator.clipboard.writeText(ip.textContent).then(() => {
+    const btn = $('#btn-copy-ip');
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  });
+}
+
+// ── Test relay connectivity ──────────────────────────────────────────────────
+
+async function testRelay() {
+  const btn = $('#btn-test-relay');
+  const result = $('#test-result');
+  if (!btn || !result) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Testing...';
+  result.innerHTML = '';
+  result.className = 'progress-log mt-16';
+
+  try {
+    const { session_id } = await api.post('/api/relay/test', {});
+    connectSSE(session_id, (ev) => {
+      renderProgressEvent(result, ev);
+    }, (err) => {
+      if (err) {
+        result.innerHTML += `<div class="progress-step failed"><span class="step-label">${err.message}</span></div>`;
+      }
+      btn.disabled = false;
+      btn.textContent = 'Test Connectivity';
+    });
+  } catch (err) {
+    result.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
     btn.disabled = false;
+    btn.textContent = 'Test Connectivity';
   }
 }

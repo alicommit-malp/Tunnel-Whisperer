@@ -190,10 +190,17 @@ func (x *Instance) StartClient(clientCfg config.ClientConfig) error {
 	return nil
 }
 
+// Running reports whether the xray-core instance is started.
+func (x *Instance) Running() bool {
+	return x != nil && x.instance != nil
+}
+
 // Close shuts down the xray-core instance.
 func (x *Instance) Close() error {
 	if x.instance != nil {
-		return x.instance.Close()
+		err := x.instance.Close()
+		x.instance = nil
+		return err
 	}
 	return nil
 }

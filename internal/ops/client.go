@@ -14,10 +14,11 @@ import (
 
 // ClientStatus describes the client lifecycle state.
 type ClientStatus struct {
-	State  ServerState `json:"state"`
-	Xray   bool        `json:"xray"`
-	Tunnel bool        `json:"tunnel"`
-	Error  string      `json:"error,omitempty"`
+	State       ServerState `json:"state"`
+	Xray        bool        `json:"xray"`
+	Tunnel      bool        `json:"tunnel"`
+	Error       string      `json:"error,omitempty"`
+	TunnelError string      `json:"tunnel_error,omitempty"`
 }
 
 // clientManager controls the lifecycle of client components.
@@ -176,14 +177,24 @@ func (m *clientManager) Stop(progress ProgressFunc) error {
 	return nil
 }
 
-// Status returns the current client state.
+// Status returns the current client state with real health checks.
 func (m *clientManager) Status() ClientStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return ClientStatus{
-		State:  m.state,
-		Xray:   m.xrayInst != nil,
-		Tunnel: m.tunnel != nil,
-		Error:  m.lastErr,
+
+	s := ClientStatus{
+		State: m.state,
+		Error: m.lastErr,
 	}
+
+	if m.xrayInst != nil {
+		s.Xray = m.xrayInst.Running()
+	}
+
+	if m.tunnel != nil {
+		s.Tunnel = m.tunnel.Connected()
+		s.TunnelError = m.tunnel.LastError()
+	}
+
+	return s
 }
