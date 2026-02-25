@@ -7,9 +7,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	"github.com/tunnelwhisperer/tw/internal/api"
 	"github.com/tunnelwhisperer/tw/internal/config"
-	"github.com/tunnelwhisperer/tw/internal/core"
 	twssh "github.com/tunnelwhisperer/tw/internal/ssh"
 	twxray "github.com/tunnelwhisperer/tw/internal/xray"
 )
@@ -20,7 +18,6 @@ type ServerStatus struct {
 	SSH         bool        `json:"ssh"`
 	Xray        bool        `json:"xray"`
 	Tunnel      bool        `json:"tunnel"`
-	API         bool        `json:"api"`
 	Error       string      `json:"error,omitempty"`
 	TunnelError string      `json:"tunnel_error,omitempty"`
 }
@@ -33,10 +30,9 @@ type serverManager struct {
 	sshSrv   *twssh.Server
 	xrayInst *twxray.Instance
 	tunnel   *twssh.ReverseTunnel
-	apiSrv   *api.Server
 }
 
-// Start launches all server components (SSH, Xray, reverse tunnel, gRPC API).
+// Start launches all server components (SSH, Xray, reverse tunnel).
 func (m *serverManager) Start(o *Ops, progress ProgressFunc) error {
 	m.mu.Lock()
 	if m.state == StateRunning || m.state == StateStarting {
@@ -62,9 +58,9 @@ func (m *serverManager) Start(o *Ops, progress ProgressFunc) error {
 		return err
 	}
 
-	total := 4
+	total := 2
 	if cfg.Xray.RelayHost != "" {
-		total = 6
+		total = 4
 	}
 
 	// Step 1: Ensure keys.
@@ -74,19 +70,11 @@ func (m *serverManager) Start(o *Ops, progress ProgressFunc) error {
 	}
 	progress(ProgressEvent{Step: 1, Total: total, Label: "SSH keys", Status: "completed"})
 
-	// Step 2: Initialize core.
-	progress(ProgressEvent{Step: 2, Total: total, Label: "Core service", Status: "running"})
-	svc := core.New(config.Dir())
-	if err := svc.Init(); err != nil {
-		return fail(2, total, "Core service", err)
-	}
-	progress(ProgressEvent{Step: 2, Total: total, Label: "Core service", Status: "completed"})
-
-	// Step 3: Start SSH server.
-	progress(ProgressEvent{Step: 3, Total: total, Label: "SSH server", Status: "running"})
+	// Step 2: Start SSH server.
+	progress(ProgressEvent{Step: 2, Total: total, Label: "SSH server", Status: "running"})
 	sshServer, err := twssh.NewServer(cfg.Server.SSHPort, config.HostKeyDir(), config.AuthorizedKeysPath())
 	if err != nil {
-		return fail(3, total, "SSH server", err)
+		return fail(2, total, "SSH server", err)
 	}
 	go func() {
 		if err := sshServer.Run(); err != nil {
@@ -96,11 +84,11 @@ func (m *serverManager) Start(o *Ops, progress ProgressFunc) error {
 	m.mu.Lock()
 	m.sshSrv = sshServer
 	m.mu.Unlock()
-	progress(ProgressEvent{Step: 3, Total: total, Label: "SSH server", Status: "completed", Message: fmt.Sprintf("listening on :%d", cfg.Server.SSHPort)})
+	progress(ProgressEvent{Step: 2, Total: total, Label: "SSH server", Status: "completed", Message: fmt.Sprintf("listening on :%d", cfg.Server.SSHPort)})
 
-	step := 4
+	step := 3
 
-	// Steps 4-5: Xray + reverse tunnel (if relay configured).
+	// Steps 3-4: Xray + reverse tunnel (if relay configured).
 	if cfg.Xray.RelayHost != "" {
 		if cfg.Xray.UUID == "" {
 			cfg.Xray.UUID = uuid.New().String()
@@ -142,23 +130,7 @@ func (m *serverManager) Start(o *Ops, progress ProgressFunc) error {
 		m.tunnel = rt
 		m.mu.Unlock()
 		progress(ProgressEvent{Step: step, Total: total, Label: "Reverse tunnel", Status: "completed", Message: fmt.Sprintf("relay :%d → local :%d", cfg.Server.RemotePort, cfg.Server.SSHPort)})
-
-		step++
 	}
-
-	// Final step: gRPC API.
-	progress(ProgressEvent{Step: step, Total: total, Label: "gRPC API", Status: "running"})
-	apiAddr := fmt.Sprintf(":%d", cfg.Server.APIPort)
-	apiServer := api.NewServer(svc, apiAddr)
-	go func() {
-		if err := apiServer.Run(); err != nil {
-			slog.Error("gRPC API error", "error", err)
-		}
-	}()
-	m.mu.Lock()
-	m.apiSrv = apiServer
-	m.mu.Unlock()
-	progress(ProgressEvent{Step: step, Total: total, Label: "gRPC API", Status: "completed", Message: apiAddr})
 
 	m.mu.Lock()
 	m.state = StateRunning
@@ -184,9 +156,6 @@ func (m *serverManager) Stop(progress ProgressFunc) error {
 	step := 1
 	total := 0
 	m.mu.Lock()
-	if m.apiSrv != nil {
-		total++
-	}
 	if m.tunnel != nil {
 		total++
 	}
@@ -203,18 +172,6 @@ func (m *serverManager) Stop(progress ProgressFunc) error {
 	}
 
 	m.mu.Lock()
-	if m.apiSrv != nil {
-		m.mu.Unlock()
-		progress(ProgressEvent{Step: step, Total: total, Label: "gRPC API", Status: "running"})
-		m.apiSrv.Stop()
-		m.mu.Lock()
-		m.apiSrv = nil
-		m.mu.Unlock()
-		progress(ProgressEvent{Step: step, Total: total, Label: "gRPC API", Status: "completed"})
-		step++
-		m.mu.Lock()
-	}
-
 	if m.tunnel != nil {
 		m.mu.Unlock()
 		progress(ProgressEvent{Step: step, Total: total, Label: "Reverse tunnel", Status: "running"})
@@ -267,7 +224,6 @@ func (m *serverManager) Status() ServerStatus {
 	s := ServerStatus{
 		State: m.state,
 		SSH:   m.sshSrv != nil,
-		API:   m.apiSrv != nil,
 		Error: m.lastErr,
 	}
 

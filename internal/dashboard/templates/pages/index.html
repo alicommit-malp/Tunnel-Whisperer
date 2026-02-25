@@ -18,8 +18,6 @@
     <span class="kv-value" data-bind="srv-xray">{{if .ServerStatus.Xray}}up{{else}}down{{end}}</span>
     <span class="kv-label">Reverse Tunnel</span>
     <span class="kv-value" data-bind="srv-tunnel">{{if .ServerStatus.Tunnel}}up{{else if .ServerStatus.TunnelError}}error{{else}}down{{end}}</span>
-    <span class="kv-label">gRPC API</span>
-    <span class="kv-value" data-bind="srv-api">{{if .ServerStatus.API}}up{{else}}down{{end}}</span>
   </div>
 
   {{if .ServerStatus.TunnelError}}

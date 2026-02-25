@@ -2,11 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/tunnelwhisperer/tw/internal/api"
 	"github.com/tunnelwhisperer/tw/internal/config"
 	"github.com/tunnelwhisperer/tw/internal/dashboard"
 	"github.com/tunnelwhisperer/tw/internal/ops"
@@ -50,6 +52,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Start gRPC API server.
+	apiAddr := fmt.Sprintf(":%d", cfg.Server.APIPort)
+	apiSrv := api.NewServer(o, apiAddr)
+	go func() {
+		slog.Info("gRPC API listening", "addr", apiAddr)
+		if err := apiSrv.Run(); err != nil {
+			slog.Error("gRPC API error", "error", err)
+		}
+	}()
+
 	fmt.Println("Server running. Press Ctrl-C to stop.")
 
 	// Block until signal.
@@ -58,6 +70,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	<-sig
 
 	fmt.Println("\nShutting down...")
+	apiSrv.Stop()
 	o.StopServer(nil)
 	return nil
 }

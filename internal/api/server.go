@@ -4,25 +4,25 @@ import (
 	"log/slog"
 	"net"
 
-	"github.com/tunnelwhisperer/tw/internal/core"
+	"github.com/tunnelwhisperer/tw/internal/ops"
 	"google.golang.org/grpc"
 )
 
-// Server wraps a gRPC server and the core service.
+// Server wraps a gRPC server and the ops layer.
 type Server struct {
-	core *core.Service
+	ops  *ops.Ops
 	addr string
 	gs   *grpc.Server
 }
 
-func NewServer(svc *core.Service, addr string) *Server {
+func NewServer(o *ops.Ops, addr string) *Server {
 	gs := grpc.NewServer()
 	s := &Server{
-		core: svc,
+		ops:  o,
 		addr: addr,
 		gs:   gs,
 	}
-	RegisterTunnelWhispererServer(gs, &handler{core: svc})
+	RegisterTunnelWhispererServer(gs, &handler{ops: o})
 	return s
 }
 

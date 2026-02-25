@@ -2,8 +2,10 @@ package cli
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/spf13/cobra"
+	"github.com/tunnelwhisperer/tw/internal/api"
 	"github.com/tunnelwhisperer/tw/internal/config"
 	"github.com/tunnelwhisperer/tw/internal/dashboard"
 	"github.com/tunnelwhisperer/tw/internal/ops"
@@ -32,6 +34,16 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("initializing ops: %w", err)
 	}
+
+	// Start gRPC API so CLI commands can talk to this daemon.
+	apiAddr := fmt.Sprintf(":%d", cfg.Server.APIPort)
+	apiSrv := api.NewServer(o, apiAddr)
+	go func() {
+		slog.Info("gRPC API listening", "addr", apiAddr)
+		if err := apiSrv.Run(); err != nil {
+			slog.Error("gRPC API error", "error", err)
+		}
+	}()
 
 	port := cfg.Server.DashboardPort
 	if dashboardPort != 0 {
