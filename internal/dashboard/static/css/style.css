@@ -62,7 +62,7 @@ a:hover { text-decoration: underline; }
 .navbar-links a.active { color: var(--text); background: rgba(255,255,255,0.08); }
 
 /* ── Layout ──────────────────────────────────────────────────────────── */
-.container { max-width: 960px; margin: 0 auto; padding: 32px 24px; }
+.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
 
 h1 { font-size: 24px; font-weight: 600; margin-bottom: 16px; }
 h2 { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
@@ -152,6 +152,11 @@ input:focus, select:focus { outline: none; border-color: var(--accent); box-shad
 .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; }
 .kv-label { color: var(--text-dim); font-size: 13px; }
 .kv-value { font-family: var(--mono); font-size: 13px; }
+
+/* ── Status indicators (up/down/error) ────────────────────────────────── */
+.status-up    { color: var(--green); }
+.status-down  { color: var(--red); }
+.status-error { color: var(--red); }
 
 /* ── Progress / SSE log ──────────────────────────────────────────────── */
 .progress-log {
@@ -329,3 +334,103 @@ pre {
 
 /* ── Navbar mode label ──────────────────────────────────────────── */
 .navbar-mode { margin-left: auto; }
+
+/* ── Dashboard grid (3-column) ─────────────────────────────────── */
+.dash-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.dash-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+}
+
+.dash-card .kv { grid-template-columns: 90px 1fr; }
+
+/* ── Card actions (badge + gear) ───────────────────────────────── */
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: 16px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.settings-btn:hover {
+  color: var(--text);
+  background: rgba(255,255,255,0.08);
+  text-decoration: none;
+}
+
+/* ── Full-width button ─────────────────────────────────────────── */
+.btn-block { display: flex; justify-content: center; width: 100%; }
+
+/* ── User list (dashboard card) ────────────────────────────────── */
+.user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.user-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.user-row:last-child { border-bottom: none; }
+
+/* ── Console log ───────────────────────────────────────────────── */
+.console-card { margin-bottom: 0; }
+
+.console-log {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  height: 280px;
+  overflow-y: auto;
+}
+
+.log-line {
+  display: flex;
+  gap: 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-time { color: var(--text-dim); flex-shrink: 0; }
+.log-level { flex-shrink: 0; min-width: 40px; }
+.log-level-INFO { color: var(--accent); }
+.log-level-WARN { color: var(--yellow); }
+.log-level-ERROR { color: var(--red); }
+.log-level-DEBUG { color: var(--text-dim); }
+.log-msg { color: var(--text); }
+
+/* ── Upload area compact variant ───────────────────────────────── */
+.upload-area-sm { padding: 16px; }
+
+/* ── Responsive: stack on small screens ────────────────────────── */
+@media (max-width: 900px) {
+  .dash-grid { grid-template-columns: 1fr; }
+}

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -19,6 +20,7 @@ type Server struct {
 	mux   *http.ServeMux
 	pages map[string]*template.Template
 	sse   *sseHub
+	logs  *logBuffer
 }
 
 // NewServer creates a dashboard server.
@@ -29,10 +31,22 @@ func NewServer(addr string, o *ops.Ops) *Server {
 		mux:   http.NewServeMux(),
 		pages: make(map[string]*template.Template),
 		sse:   newSSEHub(),
+		logs:  newLogBuffer(500),
 	}
+	s.installLogHandler()
 	s.parseTemplates()
 	s.routes()
 	return s
+}
+
+// installLogHandler wraps the current slog handler with a tee that also
+// writes to the dashboard's log buffer for real-time console streaming.
+func (s *Server) installLogHandler() {
+	current := slog.Default().Handler()
+	if current == nil {
+		current = slog.NewTextHandler(os.Stderr, nil)
+	}
+	slog.SetDefault(slog.New(newTeeHandler(current, s.logs)))
 }
 
 func (s *Server) parseTemplates() {
@@ -95,6 +109,7 @@ func (s *Server) routes() {
 
 	// SSE.
 	s.mux.HandleFunc("/api/events/", s.apiEvents)
+	s.mux.HandleFunc("/api/logs", s.apiLogs)
 }
 
 // Run starts the HTTP server (blocking).

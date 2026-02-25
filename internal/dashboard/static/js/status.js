@@ -84,6 +84,89 @@ async function clientStop() {
   }
 }
 
+// ── Status polling ──────────────────────────────────────────────────────────
+
+(function() {
+  function setStatus(bind, text, cls) {
+    const el = document.querySelector(`[data-bind="${bind}"]`);
+    if (!el) return;
+    el.textContent = text;
+    el.classList.remove('status-up', 'status-down', 'status-error');
+    if (cls) el.classList.add(cls);
+  }
+
+  function setBadge(bind, text) {
+    const el = document.querySelector(`[data-bind="${bind}"]`);
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'badge badge-state';
+    if (text === 'running') el.classList.add('badge-green');
+    else if (text === 'error') el.classList.add('badge-red');
+    else if (text === 'stopped') el.classList.add('badge-dim');
+    else el.classList.add('badge-yellow');
+  }
+
+  async function poll() {
+    try {
+      const s = await api.get('/api/status');
+
+      if (s.server) {
+        setBadge('server-badge', s.server.state);
+        setStatus('srv-ssh', s.server.ssh ? 'up' : 'down', s.server.ssh ? 'status-up' : 'status-down');
+        setStatus('srv-xray', s.server.xray ? 'up' : 'down', s.server.xray ? 'status-up' : 'status-down');
+        const tunText = s.server.tunnel ? 'up' : s.server.tunnel_error ? 'error' : 'down';
+        const tunCls = s.server.tunnel ? 'status-up' : 'status-down';
+        setStatus('srv-tunnel', tunText, s.server.tunnel_error ? 'status-error' : tunCls);
+      }
+
+      if (s.client) {
+        setBadge('client-badge', s.client.state);
+        setStatus('cli-xray', s.client.xray ? 'up' : 'down', s.client.xray ? 'status-up' : 'status-down');
+        const tunText = s.client.tunnel ? 'up' : s.client.tunnel_error ? 'error' : 'down';
+        const tunCls = s.client.tunnel ? 'status-up' : 'status-down';
+        setStatus('cli-tunnel', tunText, s.client.tunnel_error ? 'status-error' : tunCls);
+      }
+    } catch (_) {}
+  }
+
+  setInterval(poll, 3000);
+  poll();
+})();
+
+// ── Console log streaming ───────────────────────────────────────────────────
+
+(function() {
+  const el = $('#console-log');
+  if (!el) return;
+
+  const source = new EventSource('/api/logs');
+  source.onmessage = (e) => {
+    const entry = JSON.parse(e.data);
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.innerHTML =
+      `<span class="log-time">${entry.time}</span>` +
+      `<span class="log-level log-level-${entry.level}">${entry.level}</span>` +
+      `<span class="log-msg">${escapeHtml(entry.msg)}</span>`;
+    el.appendChild(line);
+    el.scrollTop = el.scrollHeight;
+  };
+  source.onerror = () => {
+    // Reconnects automatically via EventSource.
+  };
+})();
+
+function clearConsole() {
+  const el = $('#console-log');
+  if (el) el.innerHTML = '';
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
 // ── Config zip upload ────────────────────────────────────────────────────────
 
 (function() {

@@ -12,6 +12,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func cappedUsers(users []ops.UserInfo, max int) []ops.UserInfo {
+	if len(users) <= max {
+		return users
+	}
+	return users[:max]
+}
+
 func (s *Server) renderPage(w http.ResponseWriter, page string, data interface{}) {
 	tmpl, ok := s.pages[page]
 	if !ok {
@@ -56,6 +63,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		ConfigPath   string
 		Relay        ops.RelayStatus
 		UserCount    int
+		Users        []ops.UserInfo
 		ServerStatus ops.ServerStatus
 		ClientStatus ops.ClientStatus
 	}{
@@ -64,6 +72,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		ConfigPath:   config.FilePath(),
 		Relay:        relay,
 		UserCount:    len(users),
+		Users:        cappedUsers(users, 3),
 		ServerStatus: srvStatus,
 		ClientStatus: cliStatus,
 	}
