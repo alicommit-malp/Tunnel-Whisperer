@@ -31,14 +31,29 @@ function wizardNext(step) {
   if (step === 4) {
     // Populate confirmation.
     const details = $('#confirm-details');
-    details.innerHTML = `
-      <span class="kv-label">Domain</span><span class="kv-value">${wizardState.domain}</span>
-      <span class="kv-label">Provider</span><span class="kv-value">${wizardState.providerName}</span>
-      <span class="kv-label">Region</span><span class="kv-value">${wizardState.regionName || wizardState.region || '(default)'}</span>
-      <span class="kv-label">Instance</span><span class="kv-value">Ubuntu 24.04 (smallest tier)</span>
-      <span class="kv-label">Firewall</span><span class="kv-value">ports 80, 443 only</span>
-      <span class="kv-label">Software</span><span class="kv-value">Caddy + Xray + SSH (localhost-only)</span>
-    `;
+    const btn = $('#btn-provision');
+
+    if (wizardState.providerKey === 'manual') {
+      details.innerHTML = `
+        <span class="kv-label">Domain</span><span class="kv-value">${wizardState.domain}</span>
+        <span class="kv-label">Provider</span><span class="kv-value">Manual Install</span>
+        <span class="kv-label">Firewall</span><span class="kv-value">ports 80, 443 only</span>
+        <span class="kv-label">Software</span><span class="kv-value">Caddy + Xray + SSH (localhost-only)</span>
+      `;
+      btn.textContent = 'Generate Script';
+      btn.onclick = generateManualScript;
+    } else {
+      details.innerHTML = `
+        <span class="kv-label">Domain</span><span class="kv-value">${wizardState.domain}</span>
+        <span class="kv-label">Provider</span><span class="kv-value">${wizardState.providerName}</span>
+        <span class="kv-label">Region</span><span class="kv-value">${wizardState.regionName || wizardState.region || '(default)'}</span>
+        <span class="kv-label">Instance</span><span class="kv-value">Ubuntu 24.04 (smallest tier)</span>
+        <span class="kv-label">Firewall</span><span class="kv-value">ports 80, 443 only</span>
+        <span class="kv-label">Software</span><span class="kv-value">Caddy + Xray + SSH (localhost-only)</span>
+      `;
+      btn.textContent = 'Provision';
+      btn.onclick = startProvision;
+    }
   }
   showStep(step);
 }
@@ -81,6 +96,25 @@ function showStep(step) {
     };
     list.appendChild(btn);
   });
+
+  // Manual install option.
+  const sep = document.createElement('div');
+  sep.className = 'text-dim mt-16 mb-8';
+  sep.style.textAlign = 'center';
+  sep.textContent = '\u2014 or \u2014';
+  list.appendChild(sep);
+
+  const manualBtn = document.createElement('button');
+  manualBtn.className = 'btn mb-8';
+  manualBtn.style.display = 'block';
+  manualBtn.style.width = '100%';
+  manualBtn.textContent = 'Manual Install (your own server)';
+  manualBtn.onclick = () => {
+    wizardState.providerKey = 'manual';
+    wizardState.providerName = 'Manual';
+    wizardNext(4);
+  };
+  list.appendChild(manualBtn);
 })();
 
 function buildCredFields(provider) {
@@ -325,5 +359,71 @@ async function testRelay() {
     result.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
     btn.disabled = false;
     btn.textContent = 'Test Connectivity';
+  }
+}
+
+// ── Manual install ──────────────────────────────────────────────────────────
+
+async function generateManualScript() {
+  const btn = $('#btn-provision');
+  btn.disabled = true;
+  showStep(5);
+
+  try {
+    const resp = await api.post('/api/relay/generate-script', {
+      domain: wizardState.domain,
+    });
+
+    $('#provision-progress').classList.add('hidden');
+    const result = $('#manual-result');
+    result.classList.remove('hidden');
+    $('#manual-script').textContent = resp.script;
+    $('#manual-domain').textContent = wizardState.domain;
+    window._manualScript = resp.script;
+  } catch (err) {
+    $('#provision-error-msg').textContent = err.message;
+    $('#provision-error').classList.remove('hidden');
+  }
+}
+
+function copyScript() {
+  if (!window._manualScript) return;
+  navigator.clipboard.writeText(window._manualScript).then(() => {
+    const btn = document.querySelector('#manual-result .btn-primary');
+    if (btn) {
+      const orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    }
+  });
+}
+
+function downloadScript() {
+  if (!window._manualScript) return;
+  const blob = new Blob([window._manualScript], { type: 'text/x-shellscript' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'install-relay.sh';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function saveManualRelay() {
+  const ip = $('#manual-ip').value.trim();
+  if (!ip) { alert('IP address is required'); return; }
+
+  const errEl = $('#manual-save-error');
+  errEl.classList.add('hidden');
+
+  try {
+    await api.post('/api/relay/save-manual', {
+      domain: wizardState.domain,
+      ip: ip,
+    });
+    window.location.href = '/relay';
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.remove('hidden');
   }
 }

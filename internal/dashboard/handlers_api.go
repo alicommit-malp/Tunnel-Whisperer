@@ -275,6 +275,57 @@ func (s *Server) apiTestRelay(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]string{"session_id": sessionID})
 }
 
+func (s *Server) apiGenerateScript(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Domain string `json:"domain"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	script, err := s.ops.GenerateManualInstallScript(req.Domain)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	jsonOK(w, map[string]string{"script": script})
+}
+
+func (s *Server) apiSaveManualRelay(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Domain string `json:"domain"`
+		IP     string `json:"ip"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.IP == "" {
+		jsonError(w, "IP address is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.ops.SaveManualRelay(req.Domain, req.IP); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	jsonOK(w, map[string]string{"status": "ok"})
+}
+
 // ── User endpoints ───────────────────────────────────────────────────────────
 
 func (s *Server) apiUsers(w http.ResponseWriter, r *http.Request) {

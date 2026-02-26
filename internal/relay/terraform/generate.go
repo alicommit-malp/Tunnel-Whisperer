@@ -21,6 +21,9 @@ var hetznerTfTmpl string
 //go:embed digitalocean.tf.tmpl
 var digitaloceanTfTmpl string
 
+//go:embed install-script.sh.tmpl
+var installScriptTmpl string
+
 // Config holds all values needed to render relay files.
 type Config struct {
 	Domain        string
@@ -63,6 +66,11 @@ func Generate(dir string, cfg Config) error {
 	}
 
 	return nil
+}
+
+// GenerateInstallScript renders the manual install bash script with the given config.
+func GenerateInstallScript(cfg Config) (string, error) {
+	return render("install-script.sh", installScriptTmpl, cfg)
 }
 
 func render(name, tmplStr string, cfg Config) (string, error) {

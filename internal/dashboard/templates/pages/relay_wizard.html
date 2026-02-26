@@ -102,6 +102,33 @@
       <button class="btn" onclick="wizardBack(3)">Back</button>
     </div>
     <div id="test-result" class="hidden mt-16"></div>
+
+    <!-- Manual install result -->
+    <div id="manual-result" class="hidden">
+      <h3>Install Script</h3>
+      <p class="text-dim mb-16">Copy this script and run it as root on your Linux machine (Ubuntu/Debian):</p>
+      <pre id="manual-script" style="max-height:400px; overflow-y:auto; font-size:13px;"></pre>
+      <div class="mt-16 flex gap-8">
+        <button class="btn btn-primary" onclick="copyScript()">Copy to Clipboard</button>
+        <button class="btn" onclick="downloadScript()">Download .sh</button>
+      </div>
+
+      <div class="card mt-16">
+        <h3>After Running the Script</h3>
+        <p class="text-dim mb-16">Enter the public IP address of the machine where you ran the script:</p>
+        <div class="form-group">
+          <label for="manual-ip">Relay IP Address</label>
+          <input type="text" id="manual-ip" placeholder="203.0.113.1">
+        </div>
+        <div class="alert alert-info">
+          Set a DNS A record: <strong><span id="manual-domain"></span></strong> &rarr; this IP address.
+        </div>
+        <div class="mt-16">
+          <button class="btn btn-primary" onclick="saveManualRelay()">Save & Finish</button>
+        </div>
+        <div id="manual-save-error" class="hidden mt-16 alert alert-error"></div>
+      </div>
+    </div>
   </div>
 </div>
 {{end}}

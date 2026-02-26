@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -36,6 +37,14 @@ type RelayStatus struct {
 	Provider    string `json:"provider,omitempty"`
 }
 
+// ManualRelayMarker is written to the relay directory when the user sets up
+// a relay manually (without Terraform).
+type ManualRelayMarker struct {
+	Domain    string `json:"domain"`
+	IP        string `json:"ip"`
+	CreatedAt string `json:"created_at"`
+}
+
 // GetRelayStatus checks if a relay has been provisioned.
 func (o *Ops) GetRelayStatus() RelayStatus {
 	cfg := o.Config()
@@ -45,7 +54,7 @@ func (o *Ops) GetRelayStatus() RelayStatus {
 		Domain: cfg.Xray.RelayHost,
 	}
 
-	// Check for tfstate to determine if provisioned.
+	// Check for tfstate to determine if cloud-provisioned.
 	if _, err := os.Stat(filepath.Join(relayDir, "terraform.tfstate")); err == nil {
 		status.Provisioned = true
 		// Try to read the IP from terraform output.
@@ -64,6 +73,17 @@ func (o *Ops) GetRelayStatus() RelayStatus {
 			case strings.Contains(tf, `provider "aws"`):
 				status.Provider = "AWS"
 			}
+		}
+		return status
+	}
+
+	// Check for manual relay marker.
+	if data, err := os.ReadFile(filepath.Join(relayDir, "manual-relay.json")); err == nil {
+		var marker ManualRelayMarker
+		if json.Unmarshal(data, &marker) == nil {
+			status.Provisioned = true
+			status.IP = marker.IP
+			status.Provider = "Manual"
 		}
 	}
 
@@ -245,6 +265,67 @@ func (o *Ops) ProvisionRelay(ctx context.Context, req RelayProvisionRequest, pro
 	return nil
 }
 
+// GenerateManualInstallScript prepares SSH keys, UUID, and config, then
+// returns a bash script for manual relay installation.
+func (o *Ops) GenerateManualInstallScript(domain string) (string, error) {
+	if err := o.EnsureKeys(); err != nil {
+		return "", fmt.Errorf("ensuring keys: %w", err)
+	}
+
+	o.mu.Lock()
+	cfg := o.cfg
+	if cfg.Xray.UUID == "" {
+		cfg.Xray.UUID = uuid.New().String()
+		if err := config.Save(cfg); err != nil {
+			o.mu.Unlock()
+			return "", fmt.Errorf("saving config: %w", err)
+		}
+	}
+	if domain != "" {
+		cfg.Xray.RelayHost = domain
+		if err := config.Save(cfg); err != nil {
+			o.mu.Unlock()
+			return "", fmt.Errorf("saving config: %w", err)
+		}
+	}
+	o.mu.Unlock()
+
+	pubKeyPath := filepath.Join(config.Dir(), "id_ed25519.pub")
+	pubKeyBytes, err := os.ReadFile(pubKeyPath)
+	if err != nil {
+		return "", fmt.Errorf("reading public key: %w", err)
+	}
+
+	tfCfg := terraform.Config{
+		Domain:    cfg.Xray.RelayHost,
+		UUID:      cfg.Xray.UUID,
+		XrayPath:  cfg.Xray.Path,
+		SSHUser:   cfg.Server.RelaySSHUser,
+		PublicKey: strings.TrimSpace(string(pubKeyBytes)),
+	}
+
+	return terraform.GenerateInstallScript(tfCfg)
+}
+
+// SaveManualRelay writes the manual relay marker file, marking the relay as provisioned.
+func (o *Ops) SaveManualRelay(domain, ip string) error {
+	relayDir := config.RelayDir()
+	if err := os.MkdirAll(relayDir, 0755); err != nil {
+		return fmt.Errorf("creating relay directory: %w", err)
+	}
+
+	marker := ManualRelayMarker{
+		Domain:    domain,
+		IP:        ip,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	data, err := json.MarshalIndent(marker, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(relayDir, "manual-relay.json"), data, 0644)
+}
+
 // caddyCertsPath returns the local path for a domain's archived Caddy TLS
 // certificate data: <config>/archive/<domain>/caddy-certs.tar.gz
 func caddyCertsPath(domain string) string {
@@ -311,8 +392,24 @@ func (o *Ops) DestroyRelay(ctx context.Context, creds map[string]string, progres
 	}
 
 	relayDir := config.RelayDir()
+
+	// Manual relay: just remove the marker and clean up.
+	if _, err := os.Stat(filepath.Join(relayDir, "manual-relay.json")); err == nil {
+		progress(ProgressEvent{Step: 1, Total: 2, Label: "Removing manual relay", Status: "running"})
+		if err := os.RemoveAll(relayDir); err != nil {
+			progress(ProgressEvent{Step: 1, Total: 2, Label: "Removing manual relay", Status: "failed", Error: err.Error()})
+			return fmt.Errorf("removing relay directory: %w", err)
+		}
+		progress(ProgressEvent{Step: 1, Total: 2, Label: "Removing manual relay", Status: "completed"})
+
+		progress(ProgressEvent{Step: 2, Total: 2, Label: "Cleaning up", Status: "running"})
+		deactivateAllUsers()
+		progress(ProgressEvent{Step: 2, Total: 2, Label: "Cleaning up", Status: "completed"})
+		return nil
+	}
+
 	if _, err := os.Stat(filepath.Join(relayDir, "terraform.tfstate")); os.IsNotExist(err) {
-		return fmt.Errorf("no relay to destroy (no tfstate found)")
+		return fmt.Errorf("no relay to destroy (no tfstate or manual marker found)")
 	}
 
 	// Step 1: Save TLS certificates for reuse (best-effort).
