@@ -105,6 +105,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/client/stop", s.apiClientStop)
 	s.mux.HandleFunc("/api/client/upload", s.apiClientUpload)
 	s.mux.HandleFunc("/api/users", s.apiUsers)
+	s.mux.HandleFunc("/api/users/apply", s.apiApplyUsers)
+	s.mux.HandleFunc("/api/users/unregister", s.apiUnregisterUsers)
 	s.mux.HandleFunc("/api/users/", s.apiUserAction) // delete, download
 
 	// SSE.

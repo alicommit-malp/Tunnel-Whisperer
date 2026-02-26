@@ -4,10 +4,23 @@
 <div class="card">
   <div class="card-header">
     <h2>Details</h2>
-    <div class="flex gap-8">
+    <div class="card-actions">
+      {{if .User.Active}}
+      <span class="badge badge-green">registered</span>
+      {{else}}
+      <span class="badge badge-dim">not registered</span>
+      {{end}}
       <a href="/api/users/{{.User.Name}}/download" class="btn btn-sm btn-primary">Download Config</a>
+      {{if .User.Active}}
+      <button class="btn btn-sm btn-danger" onclick="unregisterUser('{{.User.Name}}')">Unregister from Relay</button>
+      {{else}}
+      <button class="btn btn-sm btn-primary" onclick="applyUser('{{.User.Name}}')">Register on Relay</button>
+      {{end}}
       <button class="btn btn-sm btn-danger" id="btn-delete" onclick="deleteUser('{{.User.Name}}')">Delete</button>
     </div>
+  </div>
+  <div id="apply-progress-container" class="hidden mb-16">
+    <div class="progress-log" id="apply-progress"></div>
   </div>
   <div class="kv">
     <span class="kv-label">Name</span>

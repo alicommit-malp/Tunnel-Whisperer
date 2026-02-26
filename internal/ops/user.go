@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,17 +17,24 @@ import (
 	"github.com/tunnelwhisperer/tw/internal/config"
 	twssh "github.com/tunnelwhisperer/tw/internal/ssh"
 	twxray "github.com/tunnelwhisperer/tw/internal/xray"
+	proxymanCmd "github.com/xtls/xray-core/app/proxyman/command"
+	"github.com/xtls/xray-core/common/protocol"
+	"github.com/xtls/xray-core/common/serial"
+	"github.com/xtls/xray-core/proxy/vless"
 	gossh "golang.org/x/crypto/ssh"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"gopkg.in/yaml.v3"
 )
 
 // UserInfo describes one user.
 type UserInfo struct {
-	Name     string          `json:"name"`
-	UUID     string          `json:"uuid,omitempty"`
-	Tunnels  []config.Tunnel `json:"tunnels,omitempty"`
-	HasKey   bool            `json:"has_key"`
-	DirPath  string          `json:"-"`
+	Name    string          `json:"name"`
+	UUID    string          `json:"uuid,omitempty"`
+	Tunnels []config.Tunnel `json:"tunnels,omitempty"`
+	HasKey  bool            `json:"has_key"`
+	Active  bool            `json:"active"`
+	DirPath string          `json:"-"`
 }
 
 // PortMapping defines one client-port → server-port pair.
@@ -77,6 +85,9 @@ func (o *Ops) ListUsers() ([]UserInfo, error) {
 
 		if _, err := os.Stat(filepath.Join(ui.DirPath, "id_ed25519")); err == nil {
 			ui.HasKey = true
+		}
+		if _, err := os.Stat(filepath.Join(ui.DirPath, ".applied")); err == nil {
+			ui.Active = true
 		}
 
 		users = append(users, ui)
@@ -203,6 +214,9 @@ func (o *Ops) CreateUser(ctx context.Context, req CreateUserRequest, progress Pr
 	}
 	progress(ProgressEvent{Step: 4, Total: 4, Label: "Updating authorized_keys", Status: "completed"})
 
+	// Mark user as applied to the current relay.
+	_ = os.WriteFile(filepath.Join(userDir, ".applied"), nil, 0644)
+
 	return nil
 }
 
@@ -247,6 +261,305 @@ func (o *Ops) DeleteUser(name string) error {
 	}
 
 	return nil
+}
+
+// UnregisterUsers removes users from the current relay without deleting
+// them. Their UUIDs are removed from the relay's Xray config and the
+// .applied marker is cleared, but their local config and keys remain.
+func (o *Ops) UnregisterUsers(ctx context.Context, names []string, progress ProgressFunc) error {
+	if progress == nil {
+		progress = func(ProgressEvent) {}
+	}
+
+	cfg := o.Config()
+	if cfg.Xray.RelayHost == "" {
+		return fmt.Errorf("no relay configured")
+	}
+
+	allUsers, err := o.ListUsers()
+	if err != nil {
+		return fmt.Errorf("listing users: %w", err)
+	}
+
+	var targets []UserInfo
+	if len(names) == 0 {
+		targets = allUsers
+	} else {
+		nameSet := make(map[string]bool, len(names))
+		for _, n := range names {
+			nameSet[n] = true
+		}
+		for _, u := range allUsers {
+			if nameSet[u.Name] {
+				targets = append(targets, u)
+			}
+		}
+	}
+
+	if len(targets) == 0 {
+		return fmt.Errorf("no users to unregister")
+	}
+
+	total := len(targets) + 1
+
+	// Step 1: Remove UUIDs from relay.
+	progress(ProgressEvent{Step: 1, Total: total, Label: "Removing from relay", Status: "running"})
+	if err := removeMultipleUUIDsFromRelay(cfg, targets); err != nil {
+		progress(ProgressEvent{Step: 1, Total: total, Label: "Removing from relay", Status: "failed", Error: err.Error()})
+		return fmt.Errorf("updating relay: %w", err)
+	}
+	progress(ProgressEvent{Step: 1, Total: total, Label: "Removing from relay", Status: "completed",
+		Message: fmt.Sprintf("Removed %d UUIDs", len(targets))})
+
+	// Step 2+: Remove .applied marker from each user.
+	for i, u := range targets {
+		step := i + 2
+		progress(ProgressEvent{Step: step, Total: total, Label: u.Name, Status: "running"})
+		os.Remove(filepath.Join(u.DirPath, ".applied"))
+		progress(ProgressEvent{Step: step, Total: total, Label: u.Name, Status: "completed", Message: "unregistered"})
+	}
+
+	return nil
+}
+
+// removeMultipleUUIDsFromRelay opens a single SSH connection to the relay
+// and removes all given user UUIDs from the Xray config in one batch.
+func removeMultipleUUIDsFromRelay(cfg *config.Config, users []UserInfo) error {
+	if len(users) == 0 {
+		return nil
+	}
+	return withRelaySSH(cfg, func(client *gossh.Client) error {
+		xrayConf, err := readRelayXrayConfig(client)
+		if err != nil {
+			return err
+		}
+
+		settings, clients, err := relayClients(xrayConf)
+		if err != nil {
+			return err
+		}
+
+		// Build set of UUIDs to remove.
+		removeSet := make(map[string]bool, len(users))
+		for _, u := range users {
+			if u.UUID != "" {
+				removeSet[u.UUID] = true
+			}
+		}
+
+		// Filter out removed UUIDs.
+		filtered := make([]interface{}, 0, len(clients))
+		for _, c := range clients {
+			if cm, ok := c.(map[string]interface{}); ok {
+				if id, _ := cm["id"].(string); removeSet[id] {
+					continue
+				}
+			}
+			filtered = append(filtered, c)
+		}
+
+		if len(filtered) == len(clients) {
+			return nil // nothing to remove
+		}
+
+		// Collect UUIDs being removed for the API call.
+		removedUUIDs := make([]string, 0)
+		for _, u := range users {
+			if u.UUID != "" {
+				removedUUIDs = append(removedUUIDs, u.UUID)
+			}
+		}
+
+		settings["clients"] = filtered
+		if err := writeRelayXrayConfig(client, xrayConf); err != nil {
+			return err
+		}
+
+		// Hot-remove from running Xray via API; restart as fallback.
+		if err := xrayAPIRemoveUsers(client, removedUUIDs); err != nil {
+			slog.Warn("xray API remove failed, restarting xray", "error", err)
+			restartRelayXray(client)
+		}
+		return nil
+	})
+}
+
+// ApplyUsers registers users on the current relay. If names is empty,
+// all users are applied. This treats the relay as brand-new: each user's
+// UUID is added to the relay's Xray config, and the user's local config
+// is updated with the current relay settings (domain, port, path) so
+// downloaded config bundles always reflect the active relay.
+func (o *Ops) ApplyUsers(ctx context.Context, names []string, progress ProgressFunc) error {
+	if progress == nil {
+		progress = func(ProgressEvent) {}
+	}
+
+	cfg := o.Config()
+	if cfg.Xray.RelayHost == "" {
+		return fmt.Errorf("no relay configured")
+	}
+
+	// Collect users to apply.
+	allUsers, err := o.ListUsers()
+	if err != nil {
+		return fmt.Errorf("listing users: %w", err)
+	}
+
+	var targets []UserInfo
+	if len(names) == 0 {
+		targets = allUsers
+	} else {
+		nameSet := make(map[string]bool, len(names))
+		for _, n := range names {
+			nameSet[n] = true
+		}
+		for _, u := range allUsers {
+			if nameSet[u.Name] {
+				targets = append(targets, u)
+			}
+		}
+	}
+
+	if len(targets) == 0 {
+		return fmt.Errorf("no users to apply")
+	}
+
+	total := len(targets) + 1 // +1 for the relay connection step
+
+	// Step 1: Register all UUIDs on the relay.
+	progress(ProgressEvent{Step: 1, Total: total, Label: "Registering on relay", Status: "running"})
+	uuids := make([]string, 0, len(targets))
+	for _, u := range targets {
+		if u.UUID != "" {
+			uuids = append(uuids, u.UUID)
+		}
+	}
+	if err := addMultipleUUIDsToRelay(cfg, uuids); err != nil {
+		progress(ProgressEvent{Step: 1, Total: total, Label: "Registering on relay", Status: "failed", Error: err.Error()})
+		return fmt.Errorf("updating relay: %w", err)
+	}
+	progress(ProgressEvent{Step: 1, Total: total, Label: "Registering on relay", Status: "completed",
+		Message: fmt.Sprintf("Registered %d UUIDs", len(uuids))})
+
+	// Step 2+: Update each user's config with current relay settings and mark applied.
+	for i, u := range targets {
+		step := i + 2
+		progress(ProgressEvent{Step: step, Total: total, Label: u.Name, Status: "running"})
+
+		if err := syncUserConfig(u.DirPath, cfg); err != nil {
+			slog.Warn("could not update user config", "user", u.Name, "error", err)
+			progress(ProgressEvent{Step: step, Total: total, Label: u.Name, Status: "completed",
+				Message: "registered (config update failed: " + err.Error() + ")"})
+		} else {
+			progress(ProgressEvent{Step: step, Total: total, Label: u.Name, Status: "completed",
+				Message: "registered and config updated"})
+		}
+
+		_ = os.WriteFile(filepath.Join(u.DirPath, ".applied"), nil, 0644)
+	}
+
+	return nil
+}
+
+// syncUserConfig updates a user's config.yaml with the current relay
+// settings (domain, port, path, remote SSH port). This ensures downloaded
+// config bundles always match the active relay, even after switching to a
+// new relay with a different domain.
+func syncUserConfig(userDir string, cfg *config.Config) error {
+	cfgPath := filepath.Join(userDir, "config.yaml")
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return err
+	}
+
+	var clientCfg struct {
+		Xray   config.XrayConfig   `yaml:"xray"`
+		Client config.ClientConfig `yaml:"client"`
+	}
+	if err := yaml.Unmarshal(data, &clientCfg); err != nil {
+		return err
+	}
+
+	clientCfg.Xray.RelayHost = cfg.Xray.RelayHost
+	clientCfg.Xray.RelayPort = cfg.Xray.RelayPort
+	clientCfg.Xray.Path = cfg.Xray.Path
+	clientCfg.Client.ServerSSHPort = cfg.Server.RemotePort
+
+	updated, err := yaml.Marshal(clientCfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(cfgPath, updated, 0644)
+}
+
+// deactivateAllUsers removes .applied markers from all user directories.
+func deactivateAllUsers() {
+	usersDir := config.UsersDir()
+	entries, err := os.ReadDir(usersDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		os.Remove(filepath.Join(usersDir, e.Name(), ".applied"))
+	}
+}
+
+// addMultipleUUIDsToRelay opens a single SSH connection to the relay and
+// adds all given UUIDs in one batch — much faster than calling addUUIDToRelay
+// per-user.
+func addMultipleUUIDsToRelay(cfg *config.Config, uuids []string) error {
+	if len(uuids) == 0 {
+		return nil
+	}
+	return withRelaySSH(cfg, func(client *gossh.Client) error {
+		xrayConf, err := readRelayXrayConfig(client)
+		if err != nil {
+			return err
+		}
+
+		settings, clients, err := relayClients(xrayConf)
+		if err != nil {
+			return err
+		}
+
+		// Build set of existing UUIDs.
+		existing := make(map[string]bool, len(clients))
+		for _, c := range clients {
+			if cm, ok := c.(map[string]interface{}); ok {
+				if id, _ := cm["id"].(string); id != "" {
+					existing[id] = true
+				}
+			}
+		}
+
+		// Add missing UUIDs.
+		var added []string
+		for _, u := range uuids {
+			if !existing[u] {
+				clients = append(clients, map[string]interface{}{"id": u, "email": u})
+				added = append(added, u)
+			}
+		}
+
+		if len(added) > 0 {
+			settings["clients"] = clients
+			if err := writeRelayXrayConfig(client, xrayConf); err != nil {
+				return err
+			}
+		}
+
+		// Hot-add to running Xray via API; restart as fallback.
+		// We send all requested UUIDs (not just newly added) in case
+		// the running process is stale.
+		if err := xrayAPIAddUsers(client, uuids); err != nil {
+			slog.Warn("xray API add failed, restarting xray", "error", err)
+			restartRelayXray(client)
+		}
+		return nil
+	})
 }
 
 // GetUserConfigBundle returns the user's config files as a zip archive.
@@ -410,7 +723,7 @@ func readRelayXrayConfig(client *gossh.Client) (map[string]interface{}, error) {
 }
 
 // writeRelayXrayConfig writes the Xray config to the relay for persistence.
-// It does NOT restart Xray — use the Xray API for runtime changes.
+// It does NOT reload Xray — callers should use the API or restart separately.
 func writeRelayXrayConfig(client *gossh.Client, xrayConf map[string]interface{}) error {
 	updatedJSON, err := json.MarshalIndent(xrayConf, "", "  ")
 	if err != nil {
@@ -431,41 +744,100 @@ func writeRelayXrayConfig(client *gossh.Client, xrayConf map[string]interface{})
 	return nil
 }
 
-// restartRelayXray restarts the Xray service on the relay.
-// Used as a fallback when the Xray API is not available.
+// dialRelayXrayAPI creates a gRPC connection to the relay's Xray API
+// (127.0.0.1:10085) tunneled through the SSH connection. This lets us
+// call AlterInbound directly — the same approach 3x-ui uses — instead
+// of shelling out to the unreliable "xray api adu" CLI tool.
+func dialRelayXrayAPI(client *gossh.Client) (proxymanCmd.HandlerServiceClient, *grpc.ClientConn, error) {
+	conn, err := grpc.NewClient(
+		"passthrough:///relay-xray-api",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return client.Dial("tcp", "127.0.0.1:10085")
+		}),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("grpc dial relay API: %w", err)
+	}
+	return proxymanCmd.NewHandlerServiceClient(conn), conn, nil
+}
+
+// xrayAPIAddUsers hot-adds UUIDs to the running Xray process via gRPC.
+// Each UUID is added as a VLESS client on the "vless-in" inbound.
+func xrayAPIAddUsers(client *gossh.Client, uuids []string) error {
+	if len(uuids) == 0 {
+		return nil
+	}
+
+	hsClient, conn, err := dialRelayXrayAPI(client)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for _, u := range uuids {
+		_, err := hsClient.AlterInbound(ctx, &proxymanCmd.AlterInboundRequest{
+			Tag: "vless-in",
+			Operation: serial.ToTypedMessage(&proxymanCmd.AddUserOperation{
+				User: &protocol.User{
+					Email: u,
+					Account: serial.ToTypedMessage(&vless.Account{
+						Id: u,
+					}),
+				},
+			}),
+		})
+		if err != nil {
+			return fmt.Errorf("add user %s: %w", u[:8], err)
+		}
+		slog.Info("xray API: user added", "uuid", u[:8])
+	}
+	return nil
+}
+
+// xrayAPIRemoveUsers removes UUIDs from the running Xray process via gRPC.
+func xrayAPIRemoveUsers(client *gossh.Client, uuids []string) error {
+	if len(uuids) == 0 {
+		return nil
+	}
+
+	hsClient, conn, err := dialRelayXrayAPI(client)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for _, u := range uuids {
+		_, err := hsClient.AlterInbound(ctx, &proxymanCmd.AlterInboundRequest{
+			Tag: "vless-in",
+			Operation: serial.ToTypedMessage(&proxymanCmd.RemoveUserOperation{
+				Email: u,
+			}),
+		})
+		if err != nil {
+			return fmt.Errorf("remove user %s: %w", u[:8], err)
+		}
+		slog.Info("xray API: user removed", "uuid", u[:8])
+	}
+	return nil
+}
+
+// restartRelayXray restarts Xray on the relay as a last resort. The restart
+// kills our VLESS tunnel (and thus the SSH session), but systemd completes
+// the restart independently. The error from session.Run is expected.
 func restartRelayXray(client *gossh.Client) {
 	session, err := client.NewSession()
 	if err != nil {
 		return
 	}
+	defer session.Close()
 	_ = session.Run("sudo systemctl restart xray")
-	session.Close()
-}
-
-// xrayAPIAddUser adds a user to the running Xray instance via its gRPC API.
-func xrayAPIAddUser(client *gossh.Client, uuid string) error {
-	session, err := client.NewSession()
-	if err != nil {
-		return err
-	}
-	defer session.Close()
-
-	payload := fmt.Sprintf(`{"inboundTag":"vless-in","user":{"email":"%s","level":0,"account":{"id":"%s"}}}`, uuid, uuid)
-	session.Stdin = strings.NewReader(payload)
-	return session.Run("/usr/local/bin/xray api adu --server=127.0.0.1:10085")
-}
-
-// xrayAPIRemoveUser removes a user from the running Xray instance via its gRPC API.
-func xrayAPIRemoveUser(client *gossh.Client, uuid string) error {
-	session, err := client.NewSession()
-	if err != nil {
-		return err
-	}
-	defer session.Close()
-
-	payload := fmt.Sprintf(`{"inboundTag":"vless-in","email":"%s"}`, uuid)
-	session.Stdin = strings.NewReader(payload)
-	return session.Run("/usr/local/bin/xray api rmu --server=127.0.0.1:10085")
 }
 
 // relayClients extracts the clients slice from the VLESS inbound in the
@@ -502,10 +874,9 @@ func relayClients(xrayConf map[string]interface{}) (settings map[string]interfac
 }
 
 // addUUIDToRelay connects to the relay via a temporary Xray tunnel and
-// adds a new client UUID to the relay's Xray config.  It first persists
-// the change to disk, then tries the Xray gRPC API so the running process
-// picks up the new user without a restart.  Falls back to restart for
-// relays that don't have the API configured.
+// adds a new client UUID to the relay's Xray config.  Persists to disk
+// first, then hot-adds via the Xray API.  Falls back to restart if the
+// API fails.
 func addUUIDToRelay(cfg *config.Config, newUUID string) error {
 	return withRelaySSH(cfg, func(client *gossh.Client) error {
 		xrayConf, err := readRelayXrayConfig(client)
@@ -518,24 +889,28 @@ func addUUIDToRelay(cfg *config.Config, newUUID string) error {
 			return err
 		}
 
+		alreadyPresent := false
 		for _, c := range clients {
 			if cm, ok := c.(map[string]interface{}); ok {
 				if id, _ := cm["id"].(string); id == newUUID {
-					return nil // already present
+					alreadyPresent = true
+					break
 				}
 			}
 		}
 
-		clients = append(clients, map[string]interface{}{"id": newUUID, "email": newUUID})
-		settings["clients"] = clients
+		if !alreadyPresent {
+			clients = append(clients, map[string]interface{}{"id": newUUID, "email": newUUID})
+			settings["clients"] = clients
 
-		if err := writeRelayXrayConfig(client, xrayConf); err != nil {
-			return err
+			if err := writeRelayXrayConfig(client, xrayConf); err != nil {
+				return err
+			}
 		}
 
-		// Try the Xray API first (no restart needed).
-		if err := xrayAPIAddUser(client, newUUID); err != nil {
-			slog.Warn("xray API unavailable, falling back to restart", "error", err)
+		// Hot-add to running Xray via API; restart as fallback.
+		if err := xrayAPIAddUsers(client, []string{newUUID}); err != nil {
+			slog.Warn("xray API add failed, restarting xray", "error", err)
 			restartRelayXray(client)
 		}
 		return nil
@@ -543,8 +918,8 @@ func addUUIDToRelay(cfg *config.Config, newUUID string) error {
 }
 
 // removeUUIDFromRelay connects to the relay via a temporary Xray tunnel
-// and removes a client UUID from the relay's Xray config.  Like addUUIDToRelay
-// it persists first, then uses the Xray API with a restart fallback.
+// and removes a client UUID from the relay's Xray config.  Persists to
+// disk first, then hot-removes via the Xray API.  Falls back to restart.
 func removeUUIDFromRelay(cfg *config.Config, targetUUID string) error {
 	return withRelaySSH(cfg, func(client *gossh.Client) error {
 		xrayConf, err := readRelayXrayConfig(client)
@@ -577,9 +952,9 @@ func removeUUIDFromRelay(cfg *config.Config, targetUUID string) error {
 			return err
 		}
 
-		// Try the Xray API first (no restart needed).
-		if err := xrayAPIRemoveUser(client, targetUUID); err != nil {
-			slog.Warn("xray API unavailable, falling back to restart", "error", err)
+		// Hot-remove from running Xray via API; restart as fallback.
+		if err := xrayAPIRemoveUsers(client, []string{targetUUID}); err != nil {
+			slog.Warn("xray API remove failed, restarting xray", "error", err)
 			restartRelayXray(client)
 		}
 		return nil

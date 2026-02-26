@@ -427,6 +427,48 @@ pre {
 .log-level-DEBUG { color: var(--text-dim); }
 .log-msg { color: var(--text); }
 
+/* ── DNS setup card (provisioning wizard) ─────────────────────── */
+.dns-setup-card {
+  background: rgba(88,166,255,0.06);
+  border: 1px solid rgba(88,166,255,0.3);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.dns-setup-card h3 { color: var(--accent); margin-bottom: 8px; }
+
+.dns-record-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin: 12px 0;
+}
+
+.dns-record-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.dns-record-row + .dns-record-row { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 4px; }
+
+.dns-label {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  min-width: 50px;
+}
+
+.dns-val {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--text);
+}
+
 /* ── Upload area compact variant ───────────────────────────────── */
 .upload-area-sm { padding: 16px; }
 

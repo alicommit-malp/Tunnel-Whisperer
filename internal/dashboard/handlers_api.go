@@ -338,6 +338,56 @@ func (s *Server) apiUserAction(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) apiApplyUsers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Names []string `json:"names"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	sessionID, progress := s.sse.create()
+
+	go func() {
+		if err := s.ops.ApplyUsers(context.Background(), req.Names, progress); err != nil {
+			slog.Error("apply users failed", "error", err)
+		}
+	}()
+
+	jsonOK(w, map[string]string{"session_id": sessionID})
+}
+
+func (s *Server) apiUnregisterUsers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Names []string `json:"names"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	sessionID, progress := s.sse.create()
+
+	go func() {
+		if err := s.ops.UnregisterUsers(context.Background(), req.Names, progress); err != nil {
+			slog.Error("unregister users failed", "error", err)
+		}
+	}()
+
+	jsonOK(w, map[string]string{"session_id": sessionID})
+}
+
 func (s *Server) apiUserDownload(w http.ResponseWriter, r *http.Request, name string) {
 	data, err := s.ops.GetUserConfigBundle(name)
 	if err != nil {

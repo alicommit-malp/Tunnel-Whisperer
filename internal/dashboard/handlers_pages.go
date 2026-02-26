@@ -120,16 +120,25 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 	relay := s.ops.GetRelayStatus()
 	srvStatus := s.ops.ServerStatus()
 
+	var inactiveCount int
+	for _, u := range users {
+		if !u.Active {
+			inactiveCount++
+		}
+	}
+
 	data := struct {
 		pageData
 		Users         []ops.UserInfo
 		RelayReady    bool
 		ServerRunning bool
+		InactiveCount int
 	}{
 		pageData:      pageData{Title: "Users", Active: "users", Mode: mode},
 		Users:         users,
 		RelayReady:    relay.Provisioned,
 		ServerRunning: string(srvStatus.State) == "running",
+		InactiveCount: inactiveCount,
 	}
 	s.renderPage(w, "users", data)
 }

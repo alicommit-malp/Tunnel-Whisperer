@@ -24,6 +24,7 @@ type RelayProvisionRequest struct {
 	ProviderName string `json:"provider_name"` // display name
 	Token        string `json:"token"`
 	AWSSecretKey string `json:"aws_secret_key"`
+	Region       string `json:"region"` // provider region/location
 }
 
 // RelayStatus describes the current state of the relay.
@@ -157,23 +158,32 @@ func (o *Ops) ProvisionRelay(ctx context.Context, req RelayProvisionRequest, pro
 		return fmt.Errorf("generating terraform files: %w", err)
 	}
 
-	// Write credentials.
+	// Write credentials and region.
 	tfEnv := map[string]string{}
+	var tfvars string
 	if req.ProviderName == "AWS" {
 		tfEnv["AWS_ACCESS_KEY_ID"] = req.Token
 		tfEnv["AWS_SECRET_ACCESS_KEY"] = req.AWSSecretKey
 	} else {
-		// Find the VarName for this provider.
 		for _, p := range CloudProviders() {
 			if p.Key == req.ProviderKey {
-				tfvars := fmt.Sprintf("%s = %q\n", p.VarName, req.Token)
-				tfvarsPath := filepath.Join(relayDir, "terraform.tfvars")
-				if err := os.WriteFile(tfvarsPath, []byte(tfvars), 0600); err != nil {
-					progress(ProgressEvent{Step: 7, Total: 9, Label: "Provisioning", Status: "failed", Error: err.Error()})
-					return fmt.Errorf("writing terraform.tfvars: %w", err)
-				}
+				tfvars += fmt.Sprintf("%s = %q\n", p.VarName, req.Token)
 				break
 			}
+		}
+	}
+	if req.Region != "" {
+		regionVar := "region"
+		if req.ProviderKey == "hetzner" {
+			regionVar = "location"
+		}
+		tfvars += fmt.Sprintf("%s = %q\n", regionVar, req.Region)
+	}
+	if tfvars != "" {
+		tfvarsPath := filepath.Join(relayDir, "terraform.tfvars")
+		if err := os.WriteFile(tfvarsPath, []byte(tfvars), 0600); err != nil {
+			progress(ProgressEvent{Step: 7, Total: 9, Label: "Provisioning", Status: "failed", Error: err.Error()})
+			return fmt.Errorf("writing terraform.tfvars: %w", err)
 		}
 	}
 
@@ -197,18 +207,26 @@ func (o *Ops) ProvisionRelay(ctx context.Context, req RelayProvisionRequest, pro
 	progress(ProgressEvent{Step: 7, Total: 9, Label: "Provisioning", Status: "completed", Message: "Relay IP: " + relayIP, Data: relayIP})
 
 	// Step 8: DNS & readiness.
-	progress(ProgressEvent{Step: 8, Total: 9, Label: "DNS & readiness", Status: "running", Message: fmt.Sprintf("Create A record: %s → %s", cfg.Xray.RelayHost, relayIP)})
+	progress(ProgressEvent{Step: 8, Total: 9, Label: "DNS & readiness", Status: "running",
+		Message: fmt.Sprintf("Set DNS A record: %s → %s", cfg.Xray.RelayHost, relayIP)})
 
 	if err := o.WaitForDNS(ctx, cfg.Xray.RelayHost, relayIP, progress); err != nil {
-		slog.Warn("DNS wait timed out", "error", err)
-		progress(ProgressEvent{Step: 8, Total: 9, Label: "DNS & readiness", Status: "running", Message: "DNS timeout — Caddy will retry once DNS propagates"})
-	}
-
-	if err := o.WaitForRelay(ctx, cfg.Xray.RelayHost, 5*time.Minute, progress); err != nil {
-		slog.Warn("relay readiness timed out", "error", err)
-		progress(ProgressEvent{Step: 8, Total: 9, Label: "DNS & readiness", Status: "completed", Message: "Relay may still be initializing — try tw serve in a few minutes"})
+		slog.Warn("DNS wait cancelled", "error", err)
+		progress(ProgressEvent{Step: 8, Total: 9, Label: "DNS & readiness", Status: "completed",
+			Message: "DNS not verified — set your A record and run Test Connectivity from the relay page"})
 	} else {
-		progress(ProgressEvent{Step: 8, Total: 9, Label: "DNS & readiness", Status: "completed", Message: "Relay is ready"})
+		// DNS resolved — now wait for HTTPS (Caddy + TLS cert).
+		progress(ProgressEvent{Step: 8, Total: 9, Label: "DNS & readiness", Status: "running",
+			Message: "DNS verified — waiting for Caddy to obtain TLS certificate..."})
+
+		if err := o.WaitForRelay(ctx, cfg.Xray.RelayHost, 5*time.Minute, progress); err != nil {
+			slog.Warn("relay readiness timed out", "error", err)
+			progress(ProgressEvent{Step: 8, Total: 9, Label: "DNS & readiness", Status: "completed",
+				Message: "TLS not ready yet — Caddy will keep retrying. Check relay page in a few minutes."})
+		} else {
+			progress(ProgressEvent{Step: 8, Total: 9, Label: "DNS & readiness", Status: "completed",
+				Message: "Relay is live — DNS resolved and TLS certificate obtained"})
+		}
 	}
 
 	// Step 9: Cloud-init log (best-effort).
@@ -242,6 +260,10 @@ func (o *Ops) DestroyRelay(ctx context.Context, creds map[string]string, progres
 		progress(ProgressEvent{Step: 2, Total: 2, Label: "Cleaning up", Status: "failed", Error: err.Error()})
 		return fmt.Errorf("removing relay directory: %w", err)
 	}
+
+	// Deactivate all users — their UUIDs are no longer on any relay.
+	deactivateAllUsers()
+
 	progress(ProgressEvent{Step: 2, Total: 2, Label: "Cleaning up", Status: "completed"})
 
 	return nil
@@ -295,6 +317,13 @@ func (o *Ops) TestRelay(progress ProgressFunc) {
 	}
 }
 
+// RelaySSH opens a temporary Xray tunnel to the relay and passes the SSH
+// client to fn. The tunnel is torn down when fn returns.
+func (o *Ops) RelaySSH(fn func(client *gossh.Client) error) error {
+	cfg := o.Config()
+	return withRelaySSH(cfg, fn)
+}
+
 // ReadCloudInitLog connects to the relay via the Xray tunnel and reads
 // /var/log/cloud-init-output.log, streaming each line as a progress event.
 // This is best-effort: errors are reported as progress messages but do not
@@ -325,18 +354,22 @@ func (o *Ops) ReadCloudInitLog(cfg *config.Config, progress ProgressFunc) {
 	}
 }
 
-// WaitForDNS polls DNS every 3 seconds until the domain resolves to the
-// expected IP. Each lookup result is streamed as a log line (Step 0) so
-// the dashboard appends each attempt rather than overwriting in place.
+// WaitForDNS polls DNS every 5 seconds until the domain resolves to the
+// expected IP. Progress updates in-place on a single line (step 8) showing
+// attempt count, elapsed time, and last result.
 // The loop runs indefinitely until DNS matches or the context is cancelled.
 func (o *Ops) WaitForDNS(ctx context.Context, domain, expectedIP string, progress ProgressFunc) error {
 	if progress == nil {
 		progress = func(ProgressEvent) {}
 	}
 
-	// Initial instruction line (structured step — updates in place).
+	// Emit a dns_setup event so the frontend can show the instruction card.
 	progress(ProgressEvent{Step: 8, Total: 9, Label: "DNS", Status: "running",
-		Message: fmt.Sprintf("Point A record: %s → %s", domain, expectedIP)})
+		Message: fmt.Sprintf("Set A record: %s → %s", domain, expectedIP),
+		Data:    "dns_setup:" + domain + ":" + expectedIP})
+
+	start := time.Now()
+	attempt := 0
 
 	for {
 		select {
@@ -345,33 +378,43 @@ func (o *Ops) WaitForDNS(ctx context.Context, domain, expectedIP string, progres
 		default:
 		}
 
+		attempt++
+		elapsed := time.Since(start).Truncate(time.Second)
+
 		addrs, err := net.LookupHost(domain)
 		if err != nil {
-			progress(ProgressEvent{Message: fmt.Sprintf("  resolve %s → %v", domain, err)})
+			progress(ProgressEvent{Step: 8, Total: 9, Label: "DNS", Status: "running",
+				Message: fmt.Sprintf("attempt #%d (%s) — not resolving", attempt, elapsed)})
 		} else if len(addrs) == 0 {
-			progress(ProgressEvent{Message: fmt.Sprintf("  resolve %s → (no records)", domain)})
+			progress(ProgressEvent{Step: 8, Total: 9, Label: "DNS", Status: "running",
+				Message: fmt.Sprintf("attempt #%d (%s) — no records", attempt, elapsed)})
 		} else {
 			for _, addr := range addrs {
 				if addr == expectedIP {
-					progress(ProgressEvent{Message: fmt.Sprintf("  resolve %s → %s ✓", domain, addr)})
 					return nil
 				}
 			}
-			progress(ProgressEvent{Message: fmt.Sprintf("  resolve %s → %s (waiting for %s)", domain, strings.Join(addrs, ", "), expectedIP)})
+			progress(ProgressEvent{Step: 8, Total: 9, Label: "DNS", Status: "running",
+				Message: fmt.Sprintf("attempt #%d (%s) — resolves to %s, waiting for %s", attempt, elapsed, strings.Join(addrs, ", "), expectedIP)})
 		}
 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(3 * time.Second):
+		case <-time.After(5 * time.Second):
 		}
 	}
 }
 
-// WaitForRelay polls the relay until HTTPS responds.
+// WaitForRelay polls the relay until HTTPS responds. Progress updates
+// in-place on a single line (step 8) showing attempt count, elapsed time,
+// and a human-readable reason for the current failure.
 func (o *Ops) WaitForRelay(ctx context.Context, domain string, timeout time.Duration, progress ProgressFunc) error {
 	deadline := time.Now().Add(timeout)
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 10 * time.Second}
+	start := time.Now()
+	attempt := 0
+
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
@@ -379,21 +422,40 @@ func (o *Ops) WaitForRelay(ctx context.Context, domain string, timeout time.Dura
 		default:
 		}
 
+		attempt++
+		elapsed := time.Since(start).Truncate(time.Second)
+
 		resp, err := client.Get("https://" + domain)
 		if err == nil {
 			resp.Body.Close()
 			return nil
 		}
 
+		errStr := err.Error()
+		var reason string
+		switch {
+		case strings.Contains(errStr, "no such host"):
+			reason = "DNS not resolving yet"
+		case strings.Contains(errStr, "connection refused"):
+			reason = "Caddy not listening yet"
+		case strings.Contains(errStr, "tls:") || strings.Contains(errStr, "certificate"):
+			reason = "TLS cert not ready (Let's Encrypt in progress)"
+		case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline"):
+			reason = "connection timed out (server booting)"
+		default:
+			reason = errStr
+		}
+
 		if progress != nil {
-			progress(ProgressEvent{Step: 8, Total: 9, Label: "DNS & readiness", Status: "running", Message: "Waiting for HTTPS (Caddy + TLS)..."})
+			progress(ProgressEvent{Step: 8, Total: 9, Label: "TLS", Status: "running",
+				Message: fmt.Sprintf("attempt #%d (%s) — %s", attempt, elapsed, reason)})
 		}
 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(15 * time.Second):
+		case <-time.After(10 * time.Second):
 		}
 	}
-	return fmt.Errorf("timeout: no HTTPS response from %s", domain)
+	return fmt.Errorf("timeout after %s: %s not responding to HTTPS", timeout, domain)
 }

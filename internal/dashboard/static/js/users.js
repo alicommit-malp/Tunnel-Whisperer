@@ -88,3 +88,42 @@ async function deleteUser(name) {
     btn.disabled = false;
   }
 }
+
+// ── Register / unregister users on relay ─────────────────────────────────────
+
+async function applyUser(name) {
+  await relayUsersRequest('/api/users/apply', [name]);
+}
+
+async function applyAllUsers() {
+  await relayUsersRequest('/api/users/apply', []);
+}
+
+async function unregisterUser(name) {
+  if (!confirm(`Unregister "${name}" from the relay? They will lose tunnel access until re-registered.`)) return;
+  await relayUsersRequest('/api/users/unregister', [name]);
+}
+
+async function relayUsersRequest(endpoint, names) {
+  const container = $('#apply-progress-container');
+  const log = $('#apply-progress');
+  if (!container || !log) return;
+
+  container.classList.remove('hidden');
+  log.innerHTML = '';
+
+  try {
+    const resp = await api.post(endpoint, { names });
+    connectSSE(resp.session_id, (event) => {
+      renderProgressEvent(log, event);
+    }, (err) => {
+      if (err) {
+        log.innerHTML += `<div class="progress-step failed"><span class="step-label">Error: ${err.message}</span></div>`;
+      } else {
+        setTimeout(() => { window.location.reload(); }, 1000);
+      }
+    });
+  } catch (err) {
+    log.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+  }
+}

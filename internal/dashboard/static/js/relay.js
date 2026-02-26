@@ -1,3 +1,14 @@
+// ── Navigation guard ────────────────────────────────────────────────────────
+
+let relayOpInProgress = false;
+
+window.addEventListener('beforeunload', (e) => {
+  if (!relayOpInProgress) return;
+  e.preventDefault();
+  e.returnValue = 'A relay operation is in progress. Leaving now may orphan cloud resources (VMs, DNS records) that you will need to clean up manually.';
+  return e.returnValue;
+});
+
 // ── Relay wizard state ──────────────────────────────────────────────────────
 
 let wizardState = {
@@ -6,6 +17,8 @@ let wizardState = {
   providerName: '',
   token: '',
   awsSecretKey: '',
+  region: '',
+  regionName: '',
 };
 
 function wizardNext(step) {
@@ -21,6 +34,7 @@ function wizardNext(step) {
     details.innerHTML = `
       <span class="kv-label">Domain</span><span class="kv-value">${wizardState.domain}</span>
       <span class="kv-label">Provider</span><span class="kv-value">${wizardState.providerName}</span>
+      <span class="kv-label">Region</span><span class="kv-value">${wizardState.regionName || wizardState.region || '(default)'}</span>
       <span class="kv-label">Instance</span><span class="kv-value">Ubuntu 24.04 (smallest tier)</span>
       <span class="kv-label">Firewall</span><span class="kv-value">ports 80, 443 only</span>
       <span class="kv-label">Software</span><span class="kv-value">Caddy + Xray + SSH (localhost-only)</span>
@@ -94,6 +108,17 @@ function buildCredFields(provider) {
       </div>
     `;
   }
+
+  // Region selector.
+  if (provider.regions && provider.regions.length > 0) {
+    let opts = provider.regions.map(r => `<option value="${r.key}">${r.name}</option>`).join('');
+    fields.innerHTML += `
+      <div class="form-group">
+        <label>Region</label>
+        <select id="cred-region">${opts}</select>
+      </div>
+    `;
+  }
 }
 
 // ── Credential test ─────────────────────────────────────────────────────────
@@ -107,6 +132,11 @@ async function testCreds() {
   wizardState.token = $('#cred-token').value.trim();
   const secretEl = $('#cred-secret');
   wizardState.awsSecretKey = secretEl ? secretEl.value.trim() : '';
+  const regionEl = $('#cred-region');
+  if (regionEl) {
+    wizardState.region = regionEl.value;
+    wizardState.regionName = regionEl.options[regionEl.selectedIndex].text;
+  }
 
   try {
     await api.post('/api/relay/test-creds', {
@@ -128,6 +158,7 @@ async function testCreds() {
 async function startProvision() {
   const btn = $('#btn-provision');
   btn.disabled = true;
+  relayOpInProgress = true;
   showStep(5);
 
   try {
@@ -137,21 +168,31 @@ async function startProvision() {
       provider_name: wizardState.providerName,
       token: wizardState.token,
       aws_secret_key: wizardState.awsSecretKey,
+      region: wizardState.region,
     });
 
     const log = $('#provision-progress');
     connectSSE(resp.session_id, (event) => {
       renderProgressEvent(log, event);
-      // Show sticky IP banner when step 7 completes with relay IP.
+
+      // Show DNS setup card when step 7 completes (relay IP known).
       if (event.step === 7 && event.status === 'completed' && event.data) {
-        const banner = $('#relay-ip-banner');
-        const ipVal = $('#relay-ip-value');
-        if (banner && ipVal) {
-          ipVal.textContent = event.data;
-          banner.classList.remove('hidden');
+        showDNSSetupCard(wizardState.domain, event.data);
+      }
+      // Also trigger on the dns_setup data event from WaitForDNS.
+      if (event.data && typeof event.data === 'string' && event.data.startsWith('dns_setup:')) {
+        const parts = event.data.split(':');
+        if (parts.length >= 3) {
+          showDNSSetupCard(parts[1], parts.slice(2).join(':'));
         }
       }
+      // Hide DNS card once step 8 completes.
+      if (event.step === 8 && event.status === 'completed') {
+        const card = $('#dns-setup-card');
+        if (card) card.classList.add('hidden');
+      }
     }, (err) => {
+      relayOpInProgress = false;
       if (err) {
         $('#provision-error-msg').textContent = err.message;
         $('#provision-error').classList.remove('hidden');
@@ -160,6 +201,7 @@ async function startProvision() {
       }
     });
   } catch (err) {
+    relayOpInProgress = false;
     $('#provision-error-msg').textContent = err.message;
     $('#provision-error').classList.remove('hidden');
   }
@@ -191,6 +233,7 @@ function hideDestroyPrompt() {
 async function destroyRelay() {
   const btn = $('#btn-destroy-confirm') || $('#btn-destroy');
   if (btn) btn.disabled = true;
+  relayOpInProgress = true;
 
   const credsPanel = $('#destroy-creds');
   if (credsPanel) credsPanel.classList.add('hidden');
@@ -215,6 +258,7 @@ async function destroyRelay() {
     connectSSE(resp.session_id, (event) => {
       renderProgressEvent(log, event);
     }, (err) => {
+      relayOpInProgress = false;
       if (err) {
         log.innerHTML += `<div class="progress-step failed"><span class="step-label">Error: ${err.message}</span></div>`;
       } else {
@@ -222,18 +266,32 @@ async function destroyRelay() {
       }
     });
   } catch (err) {
+    relayOpInProgress = false;
     log.innerHTML = `<div class="progress-step failed"><span class="step-label">Error: ${err.message}</span></div>`;
     if (btn) btn.disabled = false;
   }
 }
 
+// ── DNS setup card ──────────────────────────────────────────────────────────
+
+function showDNSSetupCard(domain, ip) {
+  const card = $('#dns-setup-card');
+  if (!card) return;
+  const domainEl = $('#dns-domain');
+  const ipEl = $('#dns-ip');
+  if (domainEl) domainEl.textContent = domain;
+  if (ipEl) ipEl.textContent = ip;
+  card.classList.remove('hidden');
+}
+
 // ── Copy relay IP ────────────────────────────────────────────────────────────
 
 function copyRelayIP() {
-  const ip = $('#relay-ip-value');
+  const ip = $('#dns-ip') || $('#relay-ip-value');
   if (!ip) return;
   navigator.clipboard.writeText(ip.textContent).then(() => {
     const btn = $('#btn-copy-ip');
+    if (!btn) return;
     const orig = btn.textContent;
     btn.textContent = 'Copied!';
     setTimeout(() => { btn.textContent = orig; }, 1500);

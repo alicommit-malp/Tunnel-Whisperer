@@ -67,11 +67,28 @@
 <div class="wizard-panel" id="step-5">
   <div class="card">
     <h2>Provisioning</h2>
-    <div id="relay-ip-banner" class="ip-banner hidden">
-      <span class="text-dim">Relay IP:</span>
-      <code id="relay-ip-value"></code>
-      <button class="btn btn-sm" onclick="copyRelayIP()" id="btn-copy-ip">Copy</button>
+
+    <!-- DNS setup instruction card — shown after terraform gives us the IP -->
+    <div id="dns-setup-card" class="dns-setup-card hidden">
+      <h3>Action Required: Set Up DNS</h3>
+      <p>Go to your DNS provider and create an <strong>A record</strong> pointing your domain to the relay IP:</p>
+      <div class="dns-record-box">
+        <div class="dns-record-row">
+          <span class="dns-label">Type</span>
+          <span class="dns-val">A</span>
+        </div>
+        <div class="dns-record-row">
+          <span class="dns-label">Name</span>
+          <span class="dns-val" id="dns-domain"></span>
+        </div>
+        <div class="dns-record-row">
+          <span class="dns-label">Value</span>
+          <span class="dns-val"><code class="copyable" id="dns-ip" onclick="copyRelayIP()"></code> <button class="btn btn-sm" onclick="copyRelayIP()" id="btn-copy-ip">Copy</button></span>
+        </div>
+      </div>
+      <p class="text-dim mt-8">Waiting for DNS to propagate... This page will continue automatically once the domain resolves.</p>
     </div>
+
     <div class="progress-log" id="provision-progress"></div>
     <div id="provision-done" class="hidden mt-16">
       <div class="alert alert-success">Relay provisioned successfully.</div>

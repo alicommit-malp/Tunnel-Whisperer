@@ -6,8 +6,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 )
+
+// ansiRE strips ANSI escape sequences from terminal output.
+var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
 // RunTerraform executes a terraform command in dir with the given env vars.
 // Output is streamed line-by-line as progress events so the dashboard shows
@@ -15,11 +19,10 @@ import (
 func (o *Ops) RunTerraform(ctx context.Context, dir string, env map[string]string, progress ProgressFunc, args ...string) error {
 	cmd := exec.CommandContext(ctx, "terraform", args...)
 	cmd.Dir = dir
-	if len(env) > 0 {
-		cmd.Env = os.Environ()
-		for k, v := range env {
-			cmd.Env = append(cmd.Env, k+"="+v)
-		}
+	cmd.Env = os.Environ()
+	cmd.Env = append(cmd.Env, "TF_IN_AUTOMATION=1") // suppress color and interactive prompts
+	for k, v := range env {
+		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 
 	// Pipe stdout+stderr so we can stream to progress.
@@ -33,12 +36,12 @@ func (o *Ops) RunTerraform(ctx context.Context, dir string, env map[string]strin
 		return fmt.Errorf("terraform %s: %w", strings.Join(args, " "), err)
 	}
 
-	// Stream output line-by-line.
+	// Stream output line-by-line, stripping any ANSI escape codes.
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 256*1024), 256*1024)
 	var lastLines []string
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := ansiRE.ReplaceAllString(scanner.Text(), "")
 		lastLines = append(lastLines, line)
 		// Keep only last 50 lines for error context.
 		if len(lastLines) > 50 {
