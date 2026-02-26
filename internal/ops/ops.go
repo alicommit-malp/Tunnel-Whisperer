@@ -3,6 +3,7 @@ package ops
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/tunnelwhisperer/tw/internal/config"
 )
@@ -39,6 +40,12 @@ type Ops struct {
 	mu  sync.Mutex // serialises relay + user operations
 	srv serverManager
 	cli clientManager
+
+	onlineMu      sync.RWMutex
+	onlineCache   map[string]bool
+	onlinePoll    time.Time
+	onlineRefresh sync.Mutex // prevents concurrent refreshes
+	trafficReset  bool       // true after first traffic stats reset
 }
 
 // New loads the configuration and returns a ready Ops instance.

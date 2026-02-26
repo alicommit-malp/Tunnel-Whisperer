@@ -120,10 +120,15 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 	relay := s.ops.GetRelayStatus()
 	srvStatus := s.ops.ServerStatus()
 
+	// Populate online status from relay stats.
+	online := s.ops.GetOnlineUsers()
 	var inactiveCount int
-	for _, u := range users {
-		if !u.Active {
+	for i := range users {
+		if !users[i].Active {
 			inactiveCount++
+		}
+		if users[i].UUID != "" && online[users[i].UUID] {
+			users[i].Online = true
 		}
 	}
 
@@ -169,9 +174,9 @@ func (s *Server) handleUserDetail(w http.ResponseWriter, r *http.Request) {
 
 	users, _ := s.ops.ListUsers()
 	var found *ops.UserInfo
-	for _, u := range users {
+	for i, u := range users {
 		if u.Name == name {
-			found = &u
+			found = &users[i]
 			break
 		}
 	}
@@ -179,6 +184,12 @@ func (s *Server) handleUserDetail(w http.ResponseWriter, r *http.Request) {
 	if found == nil {
 		http.NotFound(w, r)
 		return
+	}
+
+	// Populate online status.
+	if found.UUID != "" {
+		online := s.ops.GetOnlineUsers()
+		found.Online = online[found.UUID]
 	}
 
 	mode := s.ops.Mode()

@@ -388,6 +388,20 @@ func (s *Server) apiUnregisterUsers(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]string{"session_id": sessionID})
 }
 
+func (s *Server) apiOnlineUsers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	online := s.ops.GetOnlineUsers()
+	uuids := make([]string, 0, len(online))
+	for uuid := range online {
+		uuids = append(uuids, uuid)
+	}
+	jsonOK(w, map[string]interface{}{"online": uuids})
+}
+
 func (s *Server) apiUserDownload(w http.ResponseWriter, r *http.Request, name string) {
 	data, err := s.ops.GetUserConfigBundle(name)
 	if err != nil {

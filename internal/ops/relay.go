@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net"
@@ -153,6 +154,13 @@ func (o *Ops) ProvisionRelay(ctx context.Context, req RelayProvisionRequest, pro
 		PublicKey: strings.TrimSpace(string(pubKeyBytes)),
 		Provider:  req.ProviderKey,
 	}
+
+	// Load saved TLS certificates for reuse (avoids Let's Encrypt rate limits).
+	if certData, err := os.ReadFile(caddyCertsPath(cfg.Xray.RelayHost)); err == nil {
+		tfCfg.CaddyCertsB64 = base64.StdEncoding.EncodeToString(certData)
+		slog.Info("reusing saved TLS certificates", "domain", cfg.Xray.RelayHost)
+	}
+
 	if err := terraform.Generate(relayDir, tfCfg); err != nil {
 		progress(ProgressEvent{Step: 7, Total: 9, Label: "Provisioning", Status: "failed", Error: err.Error()})
 		return fmt.Errorf("generating terraform files: %w", err)
@@ -237,6 +245,65 @@ func (o *Ops) ProvisionRelay(ctx context.Context, req RelayProvisionRequest, pro
 	return nil
 }
 
+// caddyCertsPath returns the local path for a domain's archived Caddy TLS
+// certificate data: <config>/archive/<domain>/caddy-certs.tar.gz
+func caddyCertsPath(domain string) string {
+	return filepath.Join(config.Dir(), "archive", domain, "caddy-certs.tar.gz")
+}
+
+// saveCaddyCerts SSHes into the relay and saves the Caddy TLS data directory
+// as a local tarball. This is best-effort with a 30-second timeout: errors
+// are logged but do not block the caller.
+func (o *Ops) saveCaddyCerts(ctx context.Context, progress ProgressFunc) {
+	cfg := o.Config()
+	domain := cfg.Xray.RelayHost
+	if domain == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- withRelaySSH(cfg, func(client *gossh.Client) error {
+			session, err := client.NewSession()
+			if err != nil {
+				return err
+			}
+			defer session.Close()
+
+			out, err := session.Output("sudo tar czf - -C /var/lib/caddy/.local/share/caddy . 2>/dev/null")
+			if err != nil {
+				return fmt.Errorf("tarring caddy data: %w", err)
+			}
+			if len(out) == 0 {
+				return fmt.Errorf("no certificate data found")
+			}
+
+			certPath := caddyCertsPath(domain)
+			if err := os.MkdirAll(filepath.Dir(certPath), 0700); err != nil {
+				return fmt.Errorf("creating archive directory: %w", err)
+			}
+			return os.WriteFile(certPath, out, 0600)
+		})
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			slog.Warn("could not save TLS certificates", "error", err)
+			progress(ProgressEvent{Message: "Could not save TLS certificates (non-fatal): " + err.Error()})
+		} else {
+			slog.Info("TLS certificates saved", "domain", domain)
+			progress(ProgressEvent{Message: "TLS certificates saved for reuse"})
+		}
+	case <-ctx.Done():
+		slog.Warn("cert saving timed out or cancelled")
+		progress(ProgressEvent{Message: "TLS certificate saving skipped (timeout/cancelled)"})
+	}
+}
+
 // DestroyRelay tears down the relay infrastructure.
 func (o *Ops) DestroyRelay(ctx context.Context, creds map[string]string, progress ProgressFunc) error {
 	if progress == nil {
@@ -248,23 +315,30 @@ func (o *Ops) DestroyRelay(ctx context.Context, creds map[string]string, progres
 		return fmt.Errorf("no relay to destroy (no tfstate found)")
 	}
 
-	progress(ProgressEvent{Step: 1, Total: 2, Label: "Destroying relay", Status: "running"})
+	// Step 1: Save TLS certificates for reuse (best-effort).
+	progress(ProgressEvent{Step: 1, Total: 3, Label: "Saving TLS certificates", Status: "running"})
+	o.saveCaddyCerts(ctx, progress)
+	progress(ProgressEvent{Step: 1, Total: 3, Label: "Saving TLS certificates", Status: "completed"})
+
+	// Step 2: Terraform destroy.
+	progress(ProgressEvent{Step: 2, Total: 3, Label: "Destroying relay", Status: "running"})
 	if err := o.RunTerraform(ctx, relayDir, creds, progress, "destroy", "-auto-approve"); err != nil {
-		progress(ProgressEvent{Step: 1, Total: 2, Label: "Destroying relay", Status: "failed", Error: err.Error()})
+		progress(ProgressEvent{Step: 2, Total: 3, Label: "Destroying relay", Status: "failed", Error: err.Error()})
 		return err
 	}
-	progress(ProgressEvent{Step: 1, Total: 2, Label: "Destroying relay", Status: "completed"})
+	progress(ProgressEvent{Step: 2, Total: 3, Label: "Destroying relay", Status: "completed"})
 
-	progress(ProgressEvent{Step: 2, Total: 2, Label: "Cleaning up", Status: "running"})
+	// Step 3: Clean up.
+	progress(ProgressEvent{Step: 3, Total: 3, Label: "Cleaning up", Status: "running"})
 	if err := os.RemoveAll(relayDir); err != nil {
-		progress(ProgressEvent{Step: 2, Total: 2, Label: "Cleaning up", Status: "failed", Error: err.Error()})
+		progress(ProgressEvent{Step: 3, Total: 3, Label: "Cleaning up", Status: "failed", Error: err.Error()})
 		return fmt.Errorf("removing relay directory: %w", err)
 	}
 
 	// Deactivate all users — their UUIDs are no longer on any relay.
 	deactivateAllUsers()
 
-	progress(ProgressEvent{Step: 2, Total: 2, Label: "Cleaning up", Status: "completed"})
+	progress(ProgressEvent{Step: 3, Total: 3, Label: "Cleaning up", Status: "completed"})
 
 	return nil
 }

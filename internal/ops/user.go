@@ -18,6 +18,7 @@ import (
 	twssh "github.com/tunnelwhisperer/tw/internal/ssh"
 	twxray "github.com/tunnelwhisperer/tw/internal/xray"
 	proxymanCmd "github.com/xtls/xray-core/app/proxyman/command"
+	statsCmd "github.com/xtls/xray-core/app/stats/command"
 	"github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/common/serial"
 	"github.com/xtls/xray-core/proxy/vless"
@@ -34,6 +35,7 @@ type UserInfo struct {
 	Tunnels []config.Tunnel `json:"tunnels,omitempty"`
 	HasKey  bool            `json:"has_key"`
 	Active  bool            `json:"active"`
+	Online  bool            `json:"online"`
 	DirPath string          `json:"-"`
 }
 
@@ -302,18 +304,18 @@ func (o *Ops) UnregisterUsers(ctx context.Context, names []string, progress Prog
 
 	total := len(targets) + 1
 
-	// Step 1: Remove UUIDs from relay.
-	progress(ProgressEvent{Step: 1, Total: total, Label: "Removing from relay", Status: "running"})
-	if err := removeMultipleUUIDsFromRelay(cfg, targets); err != nil {
-		progress(ProgressEvent{Step: 1, Total: total, Label: "Removing from relay", Status: "failed", Error: err.Error()})
+	// Step 1: Remove UUIDs from relay config file.
+	progress(ProgressEvent{Step: 1, Total: total, Label: "Removing from relay config", Status: "running"})
+	if err := removeMultipleUUIDsFromRelayConfig(cfg, targets); err != nil {
+		progress(ProgressEvent{Step: 1, Total: total, Label: "Removing from relay config", Status: "failed", Error: err.Error()})
 		return fmt.Errorf("updating relay: %w", err)
 	}
-	progress(ProgressEvent{Step: 1, Total: total, Label: "Removing from relay", Status: "completed",
+	progress(ProgressEvent{Step: 1, Total: total, Label: "Removing from relay config", Status: "completed",
 		Message: fmt.Sprintf("Removed %d UUIDs", len(targets))})
 
-	// Step 2+: Remove .applied marker from each user.
+	// Remaining steps: Remove .applied marker from each user.
 	for i, u := range targets {
-		step := i + 2
+		step := 2 + i
 		progress(ProgressEvent{Step: step, Total: total, Label: u.Name, Status: "running"})
 		os.Remove(filepath.Join(u.DirPath, ".applied"))
 		progress(ProgressEvent{Step: step, Total: total, Label: u.Name, Status: "completed", Message: "unregistered"})
@@ -322,9 +324,9 @@ func (o *Ops) UnregisterUsers(ctx context.Context, names []string, progress Prog
 	return nil
 }
 
-// removeMultipleUUIDsFromRelay opens a single SSH connection to the relay
-// and removes all given user UUIDs from the Xray config in one batch.
-func removeMultipleUUIDsFromRelay(cfg *config.Config, users []UserInfo) error {
+// removeMultipleUUIDsFromRelayConfig removes user UUIDs from the relay's
+// Xray config file on disk. Does NOT touch the running Xray process.
+func removeMultipleUUIDsFromRelayConfig(cfg *config.Config, users []UserInfo) error {
 	if len(users) == 0 {
 		return nil
 	}
@@ -339,7 +341,6 @@ func removeMultipleUUIDsFromRelay(cfg *config.Config, users []UserInfo) error {
 			return err
 		}
 
-		// Build set of UUIDs to remove.
 		removeSet := make(map[string]bool, len(users))
 		for _, u := range users {
 			if u.UUID != "" {
@@ -347,7 +348,6 @@ func removeMultipleUUIDsFromRelay(cfg *config.Config, users []UserInfo) error {
 			}
 		}
 
-		// Filter out removed UUIDs.
 		filtered := make([]interface{}, 0, len(clients))
 		for _, c := range clients {
 			if cm, ok := c.(map[string]interface{}); ok {
@@ -362,25 +362,8 @@ func removeMultipleUUIDsFromRelay(cfg *config.Config, users []UserInfo) error {
 			return nil // nothing to remove
 		}
 
-		// Collect UUIDs being removed for the API call.
-		removedUUIDs := make([]string, 0)
-		for _, u := range users {
-			if u.UUID != "" {
-				removedUUIDs = append(removedUUIDs, u.UUID)
-			}
-		}
-
 		settings["clients"] = filtered
-		if err := writeRelayXrayConfig(client, xrayConf); err != nil {
-			return err
-		}
-
-		// Hot-remove from running Xray via API; restart as fallback.
-		if err := xrayAPIRemoveUsers(client, removedUUIDs); err != nil {
-			slog.Warn("xray API remove failed, restarting xray", "error", err)
-			restartRelayXray(client)
-		}
-		return nil
+		return writeRelayXrayConfig(client, xrayConf)
 	})
 }
 
@@ -744,11 +727,9 @@ func writeRelayXrayConfig(client *gossh.Client, xrayConf map[string]interface{})
 	return nil
 }
 
-// dialRelayXrayAPI creates a gRPC connection to the relay's Xray API
-// (127.0.0.1:10085) tunneled through the SSH connection. This lets us
-// call AlterInbound directly — the same approach 3x-ui uses — instead
-// of shelling out to the unreliable "xray api adu" CLI tool.
-func dialRelayXrayAPI(client *gossh.Client) (proxymanCmd.HandlerServiceClient, *grpc.ClientConn, error) {
+// dialRelayGRPC creates a gRPC connection to the relay's Xray API
+// (127.0.0.1:10085) tunneled through the SSH connection.
+func dialRelayGRPC(client *gossh.Client) (*grpc.ClientConn, error) {
 	conn, err := grpc.NewClient(
 		"passthrough:///relay-xray-api",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -757,9 +738,9 @@ func dialRelayXrayAPI(client *gossh.Client) (proxymanCmd.HandlerServiceClient, *
 		}),
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("grpc dial relay API: %w", err)
+		return nil, fmt.Errorf("grpc dial relay API: %w", err)
 	}
-	return proxymanCmd.NewHandlerServiceClient(conn), conn, nil
+	return conn, nil
 }
 
 // xrayAPIAddUsers hot-adds UUIDs to the running Xray process via gRPC.
@@ -769,12 +750,13 @@ func xrayAPIAddUsers(client *gossh.Client, uuids []string) error {
 		return nil
 	}
 
-	hsClient, conn, err := dialRelayXrayAPI(client)
+	conn, err := dialRelayGRPC(client)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
+	hsClient := proxymanCmd.NewHandlerServiceClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -804,12 +786,13 @@ func xrayAPIRemoveUsers(client *gossh.Client, uuids []string) error {
 		return nil
 	}
 
-	hsClient, conn, err := dialRelayXrayAPI(client)
+	conn, err := dialRelayGRPC(client)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
+	hsClient := proxymanCmd.NewHandlerServiceClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -960,3 +943,293 @@ func removeUUIDFromRelay(cfg *config.Config, targetUUID string) error {
 		return nil
 	})
 }
+
+// ensureRelayStats checks the relay's Xray config and adds the stats,
+// StatsService, and policy if missing. Returns true if the config was
+// patched (Xray needs restart).
+func ensureRelayStats(client *gossh.Client) bool {
+	xrayConf, err := readRelayXrayConfig(client)
+	if err != nil {
+		return false
+	}
+
+	changed := false
+
+	// Ensure "stats": {} exists.
+	if _, ok := xrayConf["stats"]; !ok {
+		xrayConf["stats"] = map[string]interface{}{}
+		changed = true
+	}
+
+	// Ensure "StatsService" is in the API services list.
+	api, _ := xrayConf["api"].(map[string]interface{})
+	if api == nil {
+		api = map[string]interface{}{"tag": "api"}
+		xrayConf["api"] = api
+		changed = true
+	}
+	services, _ := api["services"].([]interface{})
+	hasStats := false
+	for _, s := range services {
+		if s == "StatsService" {
+			hasStats = true
+			break
+		}
+	}
+	if !hasStats {
+		api["services"] = append(services, "StatsService")
+		changed = true
+	}
+
+	// Ensure policy exists with both system and user-level stats.
+	policy, _ := xrayConf["policy"].(map[string]interface{})
+	if policy == nil {
+		policy = map[string]interface{}{}
+		xrayConf["policy"] = policy
+		changed = true
+	}
+
+	// System-level stats (required by some Xray versions for the stats
+	// infrastructure to fully initialize).
+	system, _ := policy["system"].(map[string]interface{})
+	if system == nil {
+		system = map[string]interface{}{}
+		policy["system"] = system
+		changed = true
+	}
+	for _, key := range []string{"statsInboundUplink", "statsInboundDownlink", "statsOutboundUplink", "statsOutboundDownlink"} {
+		if v, _ := system[key].(bool); !v {
+			system[key] = true
+			changed = true
+		}
+	}
+
+	// User-level stats.
+	levels, _ := policy["levels"].(map[string]interface{})
+	if levels == nil {
+		levels = map[string]interface{}{}
+		policy["levels"] = levels
+		changed = true
+	}
+	level0, _ := levels["0"].(map[string]interface{})
+	if level0 == nil {
+		level0 = map[string]interface{}{}
+		levels["0"] = level0
+		changed = true
+	}
+	for _, key := range []string{"statsUserUplink", "statsUserDownlink", "statsUserOnline"} {
+		if v, _ := level0[key].(bool); !v {
+			level0[key] = true
+			changed = true
+		}
+	}
+
+	if !changed {
+		return false
+	}
+
+	slog.Info("patching relay Xray config with stats/policy")
+	if err := writeRelayXrayConfig(client, xrayConf); err != nil {
+		slog.Warn("failed to patch relay stats config", "error", err)
+		return false
+	}
+	restartRelayXray(client)
+	return true
+}
+
+// sshThroughServerTunnel opens an SSH connection to the relay using the
+// server's already-running Xray tunnel (dokodemo-door on SSHPort+1).
+// This is much faster than withRelaySSH since it doesn't create a
+// temporary Xray instance.
+func (o *Ops) sshThroughServerTunnel(cfg *config.Config, fn func(*gossh.Client) error) error {
+	xrayAddr := fmt.Sprintf("127.0.0.1:%d", cfg.Server.SSHPort+1)
+
+	privPath := filepath.Join(config.Dir(), "id_ed25519")
+	keyData, err := os.ReadFile(privPath)
+	if err != nil {
+		return fmt.Errorf("reading server key: %w", err)
+	}
+	signer, err := gossh.ParsePrivateKey(keyData)
+	if err != nil {
+		return fmt.Errorf("parsing server key: %w", err)
+	}
+
+	sshCfg := &gossh.ClientConfig{
+		User:            cfg.Server.RelaySSHUser,
+		Auth:            []gossh.AuthMethod{gossh.PublicKeys(signer)},
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+
+	client, err := gossh.Dial("tcp", xrayAddr, sshCfg)
+	if err != nil {
+		return fmt.Errorf("SSH to relay via server tunnel: %w", err)
+	}
+	defer client.Close()
+	return fn(client)
+}
+
+// GetOnlineUsers returns a cached map of UUID → online status.
+// The cache is refreshed via the server's running Xray tunnel when stale.
+// Returns nil if no relay is configured or the server tunnel isn't running.
+func (o *Ops) GetOnlineUsers() map[string]bool {
+	cfg := o.Config()
+	if cfg.Xray.RelayHost == "" {
+		return nil
+	}
+
+	// Online status is only meaningful when the server's Xray tunnel is up.
+	if !o.srv.Status().Xray {
+		return nil
+	}
+
+	// Return cache if fresh (< 20 seconds).
+	o.onlineMu.RLock()
+	if o.onlineCache != nil && time.Since(o.onlinePoll) < 20*time.Second {
+		cache := make(map[string]bool, len(o.onlineCache))
+		for k, v := range o.onlineCache {
+			cache[k] = v
+		}
+		o.onlineMu.RUnlock()
+		return cache
+	}
+	o.onlineMu.RUnlock()
+
+	return o.refreshOnlineStatus(cfg)
+}
+
+// refreshOnlineStatus queries the relay's StatsService for online users
+// via the server's existing Xray tunnel and updates the cache.
+func (o *Ops) refreshOnlineStatus(cfg *config.Config) map[string]bool {
+	// Prevent concurrent refreshes — return stale cache instead.
+	if !o.onlineRefresh.TryLock() {
+		o.onlineMu.RLock()
+		defer o.onlineMu.RUnlock()
+		if o.onlineCache == nil {
+			return make(map[string]bool)
+		}
+		cache := make(map[string]bool, len(o.onlineCache))
+		for k, v := range o.onlineCache {
+			cache[k] = v
+		}
+		return cache
+	}
+	defer o.onlineRefresh.Unlock()
+
+	result := make(map[string]bool)
+
+	err := o.sshThroughServerTunnel(cfg, func(client *gossh.Client) error {
+		conn, err := dialRelayGRPC(client)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+
+		sc := statsCmd.NewStatsServiceClient(conn)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		// Try dedicated online stats first (Xray statsUserOnline).
+		resp, err := sc.QueryStats(ctx, &statsCmd.QueryStatsRequest{Pattern: "online"})
+		if err != nil {
+			return fmt.Errorf("QueryStats: %w", err)
+		}
+
+		for _, s := range resp.GetStat() {
+			parts := strings.Split(s.GetName(), ">>>")
+			if len(parts) >= 3 && parts[0] == "user" && parts[len(parts)-1] == "online" && s.GetValue() > 0 {
+				result[parts[1]] = true
+			}
+		}
+
+		// Fallback: if no online stats (Xray version doesn't support
+		// statsUserOnline), use traffic stats to detect recently active
+		// users. Reset counters so each poll interval only detects users
+		// with traffic since the last check.
+		if len(resp.GetStat()) == 0 {
+			trafficResp, tErr := sc.QueryStats(ctx, &statsCmd.QueryStatsRequest{
+				Pattern: "user>>>",
+				Reset_:  true,
+			})
+			if tErr == nil && o.trafficReset {
+				serverUUID := cfg.Xray.UUID
+				for _, s := range trafficResp.GetStat() {
+					parts := strings.Split(s.GetName(), ">>>")
+					// user>>>{email}>>>traffic>>>uplink/downlink
+					if len(parts) == 4 && parts[0] == "user" && parts[2] == "traffic" && s.GetValue() > 0 {
+						if parts[1] != serverUUID {
+							result[parts[1]] = true
+						}
+					}
+				}
+			}
+			o.trafficReset = true
+		}
+
+		slog.Debug("online status refreshed", "online_count", len(result))
+		return nil
+	})
+
+	if err != nil {
+		slog.Debug("online status refresh failed", "error", err)
+	}
+
+	o.onlineMu.Lock()
+	o.onlineCache = result
+	o.onlinePoll = time.Now()
+	o.onlineMu.Unlock()
+
+	return result
+}
+
+// EnsureRelayStats patches the relay's Xray config to enable online
+// user tracking if it's not already configured. Call once at startup.
+// Uses the server's running Xray tunnel for fast access.
+func (o *Ops) EnsureRelayStats() {
+	cfg := o.Config()
+	if cfg.Xray.RelayHost == "" {
+		return
+	}
+
+	// Brief delay to let the server's Xray tunnel stabilize.
+	time.Sleep(3 * time.Second)
+
+	err := o.sshThroughServerTunnel(cfg, func(client *gossh.Client) error {
+		patched := ensureRelayStats(client)
+		if patched {
+			slog.Info("relay stats config patched, Xray restarted")
+			return nil
+		}
+
+		// Config looks correct — verify stats are actually working by
+		// querying the API. If no stats exist, force a restart to ensure
+		// the running Xray loaded the config with stats enabled.
+		conn, err := dialRelayGRPC(client)
+		if err != nil {
+			return nil // non-fatal
+		}
+		defer conn.Close()
+
+		sc := statsCmd.NewStatsServiceClient(conn)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		resp, err := sc.QueryStats(ctx, &statsCmd.QueryStatsRequest{Pattern: ""})
+		if err != nil {
+			return nil // non-fatal
+		}
+
+		// If the Xray process has been running for a while but has zero
+		// stats, the running process likely started before stats were
+		// configured. Force a restart.
+		if len(resp.GetStat()) == 0 {
+			slog.Info("relay Xray has zero stats — restarting to apply stats config")
+			restartRelayXray(client)
+		}
+		return nil
+	})
+	if err != nil {
+		slog.Warn("could not ensure relay stats config", "error", err)
+	}
+}
+

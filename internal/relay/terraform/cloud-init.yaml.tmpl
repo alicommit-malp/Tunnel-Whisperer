@@ -25,9 +25,17 @@ write_files:
     content: |
       {
         "log": { "loglevel": "warning" },
+        "stats": {},
         "api": {
           "tag": "api",
-          "services": ["HandlerService"]
+          "services": ["HandlerService", "StatsService"]
+        },
+        "policy": {
+          "system": {
+            "statsInboundUplink": true, "statsInboundDownlink": true,
+            "statsOutboundUplink": true, "statsOutboundDownlink": true
+          },
+          "levels": { "0": { "statsUserUplink": true, "statsUserDownlink": true, "statsUserOnline": true } }
         },
         "inbounds": [
           {
@@ -67,7 +75,12 @@ write_files:
     content: |
       ListenAddress 127.0.0.1
       PasswordAuthentication no
-
+{{if .CaddyCertsB64}}
+  - path: /tmp/caddy-certs.tar.gz
+    permissions: "0600"
+    encoding: b64
+    content: {{.CaddyCertsB64}}
+{{end}}
 runcmd:
   # Install Caddy
   - curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
@@ -96,4 +109,11 @@ runcmd:
   # Restart services (Ubuntu 24.04 uses 'ssh' not 'sshd')
   - systemctl restart ssh
   - systemctl enable --now xray
+{{if .CaddyCertsB64}}
+  # Restore saved TLS certificates (avoids Let's Encrypt rate limits on reprovision)
+  - mkdir -p /var/lib/caddy/.local/share/caddy
+  - tar xzf /tmp/caddy-certs.tar.gz -C /var/lib/caddy/.local/share/caddy
+  - chown -R caddy:caddy /var/lib/caddy
+  - rm -f /tmp/caddy-certs.tar.gz
+{{end}}
   - systemctl restart caddy

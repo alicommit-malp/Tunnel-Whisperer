@@ -136,6 +136,9 @@ func (m *serverManager) Start(o *Ops, progress ProgressFunc) error {
 	m.state = StateRunning
 	m.mu.Unlock()
 
+	// Patch relay stats config in the background if needed.
+	go o.EnsureRelayStats()
+
 	return nil
 }
 

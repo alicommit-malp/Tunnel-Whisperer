@@ -92,19 +92,19 @@ async function deleteUser(name) {
 // ── Register / unregister users on relay ─────────────────────────────────────
 
 async function applyUser(name) {
-  await relayUsersRequest('/api/users/apply', [name]);
+  await relayUsersRequest('/api/users/apply', { names: [name] });
 }
 
 async function applyAllUsers() {
-  await relayUsersRequest('/api/users/apply', []);
+  await relayUsersRequest('/api/users/apply', { names: [] });
 }
 
 async function unregisterUser(name) {
   if (!confirm(`Unregister "${name}" from the relay? They will lose tunnel access until re-registered.`)) return;
-  await relayUsersRequest('/api/users/unregister', [name]);
+  await relayUsersRequest('/api/users/unregister', { names: [name] });
 }
 
-async function relayUsersRequest(endpoint, names) {
+async function relayUsersRequest(endpoint, body) {
   const container = $('#apply-progress-container');
   const log = $('#apply-progress');
   if (!container || !log) return;
@@ -113,7 +113,7 @@ async function relayUsersRequest(endpoint, names) {
   log.innerHTML = '';
 
   try {
-    const resp = await api.post(endpoint, { names });
+    const resp = await api.post(endpoint, body);
     connectSSE(resp.session_id, (event) => {
       renderProgressEvent(log, event);
     }, (err) => {
@@ -126,4 +126,36 @@ async function relayUsersRequest(endpoint, names) {
   } catch (err) {
     log.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
   }
+}
+
+// ── Online status polling ───────────────────────────────────────────────────
+
+async function pollOnlineStatus() {
+  try {
+    const resp = await api.get('/api/users/online');
+    const onlineSet = new Set(resp.online || []);
+
+    $$('[data-uuid]').forEach(el => {
+      const uuid = el.dataset.uuid;
+      if (!uuid) return;
+      const badge = el.querySelector('.user-online-badge');
+      if (!badge) return;
+
+      if (onlineSet.has(uuid)) {
+        badge.textContent = 'online';
+        badge.className = 'badge badge-green user-online-badge';
+      } else {
+        badge.textContent = 'offline';
+        badge.className = 'badge badge-dim user-online-badge';
+      }
+    });
+  } catch (err) {
+    // Silently ignore — relay may be unreachable.
+  }
+}
+
+// Poll immediately on load and every 15 seconds if there are user rows.
+if ($$('[data-uuid]').length > 0) {
+  pollOnlineStatus();
+  setInterval(pollOnlineStatus, 15000);
 }

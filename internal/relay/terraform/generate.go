@@ -23,12 +23,13 @@ var digitaloceanTfTmpl string
 
 // Config holds all values needed to render relay files.
 type Config struct {
-	Domain    string
-	UUID      string
-	XrayPath  string
-	SSHUser   string
-	PublicKey string
-	Provider  string // "aws", "hetzner", or "digitalocean"
+	Domain        string
+	UUID          string
+	XrayPath      string
+	SSHUser       string
+	PublicKey     string
+	Provider      string // "aws", "hetzner", or "digitalocean"
+	CaddyCertsB64 string // base64-encoded tar.gz of saved Caddy TLS certs (optional)
 }
 
 var providerTemplates = map[string]string{

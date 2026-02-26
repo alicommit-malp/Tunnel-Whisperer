@@ -33,6 +33,7 @@ type xrayRouting struct {
 }
 
 type xrayLog struct {
+	Access   string `json:"access"`
 	LogLevel string `json:"loglevel"`
 }
 
@@ -74,7 +75,7 @@ func buildServerConfig(cfg config.XrayConfig, sshPort, relaySSHPort int) ([]byte
 	listenPort := sshPort + 1
 
 	xc := xrayConfig{
-		Log: xrayLog{LogLevel: logging.XrayLevel},
+		Log: xrayLog{Access: "none", LogLevel: logging.XrayLevel},
 		Inbounds: []interface{}{
 			map[string]interface{}{
 				"tag":      "ssh-in",
@@ -99,7 +100,7 @@ func buildServerConfig(cfg config.XrayConfig, sshPort, relaySSHPort int) ([]byte
 // port on the relay (exposed via reverse tunnel).
 func buildClientConfig(cfg config.XrayConfig, clientCfg config.ClientConfig) ([]byte, error) {
 	xc := xrayConfig{
-		Log: xrayLog{LogLevel: logging.XrayLevel},
+		Log: xrayLog{Access: "none", LogLevel: logging.XrayLevel},
 		Inbounds: []interface{}{
 			map[string]interface{}{
 				"tag":      "ssh-local",
