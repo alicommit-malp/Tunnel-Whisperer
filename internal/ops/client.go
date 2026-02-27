@@ -49,7 +49,7 @@ func (m *clientManager) Start(o *Ops, progress ProgressFunc) error {
 	cfg := o.Config()
 
 	m.mu.Lock()
-	m.cfgHash = cfg.Hash()
+	m.cfgHash = config.FileHash()
 	m.mu.Unlock()
 
 	fail := func(step int, label string, err error) error {

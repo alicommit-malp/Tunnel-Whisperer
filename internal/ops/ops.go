@@ -2,6 +2,7 @@ package ops
 
 import (
 	"fmt"
+	"log/slog"
 	"net/url"
 	"sync"
 	"time"
@@ -198,16 +199,16 @@ func (o *Ops) ClientStatus() ClientStatus {
 // that was active when the running server or client started.
 // Returns false if nothing is running.
 func (o *Ops) ConfigChanged() bool {
-	diskCfg, err := config.Load()
-	if err != nil {
+	currentHash := config.FileHash()
+	if currentHash == "" {
 		return false
 	}
-	currentHash := diskCfg.Hash()
 
 	o.srv.mu.Lock()
 	srvHash := o.srv.cfgHash
 	srvState := o.srv.state
 	o.srv.mu.Unlock()
+	slog.Debug("config change check", "disk_hash", currentHash[:12], "srv_hash", srvHash[:min(12, len(srvHash))], "srv_state", srvState)
 	if srvState == StateRunning && srvHash != "" && srvHash != currentHash {
 		return true
 	}

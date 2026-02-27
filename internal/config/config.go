@@ -63,6 +63,18 @@ func (c *Config) Hash() string {
 	return hex.EncodeToString(h[:])
 }
 
+// FileHash returns a SHA-256 hex digest of the raw config file on disk.
+// Unlike Hash(), this captures all changes including unknown fields,
+// comments, and formatting.
+func FileHash() string {
+	data, err := os.ReadFile(FilePath())
+	if err != nil {
+		return ""
+	}
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
+}
+
 // Default returns the default configuration.
 func Default() *Config {
 	return &Config{

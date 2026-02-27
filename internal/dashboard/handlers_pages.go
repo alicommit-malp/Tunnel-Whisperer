@@ -243,7 +243,12 @@ func (s *Server) handleUserDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
-	cfg := s.ops.Config()
+	// Read from disk so we always show the actual file contents,
+	// even if it was edited outside the dashboard.
+	cfg, err := config.Load()
+	if err != nil {
+		cfg = s.ops.Config()
+	}
 	cfgYAML, _ := yaml.Marshal(cfg)
 	mode := s.ops.Mode()
 
