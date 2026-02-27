@@ -427,3 +427,152 @@ async function saveManualRelay() {
     errEl.classList.remove('hidden');
   }
 }
+
+// ── SSH Terminal ──────────────────────────────────────────────────────────────
+
+let sshSocket = null;
+let sshTerm = null;
+let sshFit = null;
+let sshResizeObserver = null;
+
+function sshConnect() {
+  const container = $('#ssh-terminal');
+  const badge = $('#ssh-badge');
+  const btnConnect = $('#btn-ssh-connect');
+  const btnDisconnect = $('#btn-ssh-disconnect');
+  if (!container) return;
+
+  btnConnect.disabled = true;
+  btnConnect.textContent = 'Connecting...';
+  badge.textContent = 'connecting';
+  badge.className = 'badge badge-yellow';
+
+  // Initialize xterm.js terminal.
+  sshTerm = new Terminal({
+    cursorBlink: true,
+    fontSize: 14,
+    fontFamily: '"Fira Code", "Cascadia Code", "JetBrains Mono", monospace',
+    theme: {
+      background: '#0d1117',
+      foreground: '#c9d1d9',
+      cursor: '#58a6ff',
+      selectionBackground: '#264f78',
+    },
+  });
+  sshFit = new FitAddon.FitAddon();
+  sshTerm.loadAddon(sshFit);
+
+  container.classList.remove('hidden');
+  sshTerm.open(container);
+  sshFit.fit();
+
+  // WebSocket URL — same host, ws:// or wss:// matching current protocol.
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  sshSocket = new WebSocket(`${proto}//${location.host}/api/relay/ssh`);
+  sshSocket.binaryType = 'arraybuffer';
+
+  sshSocket.onopen = () => {
+    // Send initial size.
+    sshSocket.send(JSON.stringify({
+      type: 'resize',
+      cols: sshTerm.cols,
+      rows: sshTerm.rows,
+    }));
+  };
+
+  sshSocket.onmessage = (e) => {
+    if (typeof e.data === 'string') {
+      // Control message from server.
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'status' && msg.msg === 'connected') {
+          badge.textContent = 'connected';
+          badge.className = 'badge badge-green';
+          btnConnect.classList.add('hidden');
+          btnDisconnect.classList.remove('hidden');
+          sshTerm.focus();
+        } else if (msg.type === 'error') {
+          sshTerm.writeln('\r\n\x1b[31mError: ' + msg.msg + '\x1b[0m');
+          sshCleanup();
+        }
+      } catch (_) {}
+    } else {
+      // Binary terminal data.
+      sshTerm.write(new Uint8Array(e.data));
+    }
+  };
+
+  sshSocket.onclose = () => {
+    sshTerm.writeln('\r\n\x1b[2m--- session closed ---\x1b[0m');
+    sshCleanup();
+  };
+
+  sshSocket.onerror = () => {
+    sshCleanup();
+  };
+
+  // Terminal input → WebSocket.
+  sshTerm.onData((data) => {
+    if (sshSocket && sshSocket.readyState === WebSocket.OPEN) {
+      const encoder = new TextEncoder();
+      sshSocket.send(encoder.encode(data));
+    }
+  });
+
+  // Handle resize.
+  sshResizeObserver = new ResizeObserver(() => {
+    if (sshFit) {
+      sshFit.fit();
+      if (sshSocket && sshSocket.readyState === WebSocket.OPEN) {
+        sshSocket.send(JSON.stringify({
+          type: 'resize',
+          cols: sshTerm.cols,
+          rows: sshTerm.rows,
+        }));
+      }
+    }
+  });
+  sshResizeObserver.observe(container);
+}
+
+function sshDisconnect() {
+  if (sshSocket) {
+    sshSocket.close();
+    sshSocket = null;
+  }
+}
+
+function sshCleanup() {
+  const badge = $('#ssh-badge');
+  const btnConnect = $('#btn-ssh-connect');
+  const btnDisconnect = $('#btn-ssh-disconnect');
+
+  if (badge) {
+    badge.textContent = 'disconnected';
+    badge.className = 'badge badge-dim';
+  }
+  if (btnConnect) {
+    btnConnect.classList.remove('hidden');
+    btnConnect.disabled = false;
+    btnConnect.textContent = 'Connect';
+  }
+  if (btnDisconnect) {
+    btnDisconnect.classList.add('hidden');
+  }
+
+  if (sshResizeObserver) {
+    sshResizeObserver.disconnect();
+    sshResizeObserver = null;
+  }
+
+  sshSocket = null;
+  // Keep terminal visible so user can see last output.
+  // It will be disposed on next connect.
+  if (sshTerm) {
+    sshTerm.dispose();
+    sshTerm = null;
+    sshFit = null;
+    const container = $('#ssh-terminal');
+    if (container) container.classList.add('hidden');
+  }
+}

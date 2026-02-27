@@ -498,6 +498,14 @@ pre {
 .pagination button { min-width: 32px; }
 .pagination button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
+/* ── SSH Terminal ──────────────────────────────────────────────── */
+.ssh-terminal {
+  height: 400px;
+  background: #0d1117;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
 /* ── Responsive: stack on small screens ────────────────────────── */
 @media (max-width: 900px) {
   .dash-grid { grid-template-columns: 1fr; }
