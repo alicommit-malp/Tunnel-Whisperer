@@ -189,6 +189,23 @@ func (s *Server) apiClientStop(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]string{"session_id": sessionID})
 }
 
+func (s *Server) apiClientReconnect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	sessionID, progress := s.sse.create()
+
+	go func() {
+		if err := s.ops.ReconnectClient(progress); err != nil {
+			slog.Error("client reconnect failed", "error", err)
+		}
+	}()
+
+	jsonOK(w, map[string]string{"session_id": sessionID})
+}
+
 func (s *Server) apiClientUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)

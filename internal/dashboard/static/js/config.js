@@ -8,8 +8,9 @@ async function saveLogLevel() {
 
   try {
     await api.post('/api/log-level', { log_level: level });
+    const action = typeof serviceMode !== 'undefined' && serviceMode === 'client' ? 'Reconnect' : 'Restart';
     const restart = typeof serviceRunning !== 'undefined' && serviceRunning
-      ? ' Restart to apply.' : '';
+      ? ' ' + action + ' to apply.' : '';
     showLogLevelSuccess('Log level saved.' + restart);
     updateLogLevelBadge(level);
     reloadConfigYAML();
@@ -64,8 +65,9 @@ async function saveProxy() {
 
   try {
     await api.post('/api/proxy', { proxy: url });
+    const action = typeof serviceMode !== 'undefined' && serviceMode === 'client' ? 'Reconnect' : 'Restart';
     const restart = typeof serviceRunning !== 'undefined' && serviceRunning
-      ? ' Restart to apply.' : '';
+      ? ' ' + action + ' to apply.' : '';
     if (url) {
       showProxySuccess('Proxy saved.' + restart);
     } else {
@@ -84,8 +86,9 @@ async function clearProxy() {
   try {
     await api.post('/api/proxy', { proxy: '' });
     $('#proxy-url').value = '';
+    const action = typeof serviceMode !== 'undefined' && serviceMode === 'client' ? 'Reconnect' : 'Restart';
     const restart = typeof serviceRunning !== 'undefined' && serviceRunning
-      ? ' Restart to apply.' : '';
+      ? ' ' + action + ' to apply.' : '';
     showProxySuccess('Proxy cleared.' + restart);
     updateProxyBadge('');
     reloadConfigYAML();

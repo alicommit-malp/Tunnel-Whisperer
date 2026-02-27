@@ -1,9 +1,9 @@
 {{define "content"}}
 
 {{if .ConfigChanged}}
-<div class="alert alert-warning mb-16" id="config-changed">Configuration has changed. Restart to apply.</div>
+<div class="alert alert-warning mb-16" id="config-changed">Configuration has changed. {{if eq .Mode "client"}}Reconnect{{else}}Restart{{end}} to apply.</div>
 {{else}}
-<div class="alert alert-warning mb-16 hidden" id="config-changed">Configuration has changed. Restart to apply.</div>
+<div class="alert alert-warning mb-16 hidden" id="config-changed">Configuration has changed. {{if eq .Mode "client"}}Reconnect{{else}}Restart{{end}} to apply.</div>
 {{end}}
 
 {{if eq .Mode "server"}}
@@ -172,7 +172,10 @@
       {{if eq .ClientStatus.State "stopped"}}
         <button class="btn btn-primary btn-block" id="btn-client-start" onclick="clientStart()">Connect</button>
       {{else if eq .ClientStatus.State "running"}}
-        <button class="btn btn-danger btn-block" id="btn-client-stop" onclick="clientStop()">Disconnect</button>
+        <div class="flex gap-8">
+          <button class="btn btn-danger flex-1" id="btn-client-stop" onclick="clientStop()">Disconnect</button>
+          <button class="btn btn-primary flex-1" id="btn-client-reconnect" onclick="clientReconnect()">Reconnect</button>
+        </div>
       {{else if eq .ClientStatus.State "error"}}
         <button class="btn btn-primary btn-block" id="btn-client-start" onclick="clientStart()">Retry</button>
       {{else}}

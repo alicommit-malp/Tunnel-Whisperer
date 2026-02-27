@@ -106,6 +106,28 @@ async function clientStop() {
   }
 }
 
+async function clientReconnect() {
+  const btn = $('#btn-client-reconnect');
+  if (btn) btn.disabled = true;
+
+  const log = $('#client-progress');
+  log.classList.remove('hidden');
+  log.innerHTML = '';
+
+  try {
+    const { session_id } = await api.post('/api/client/reconnect', {});
+    connectSSE(session_id, (ev) => renderProgressEvent(log, ev), (err) => {
+      if (err) {
+        log.innerHTML += `<div class="progress-step failed"><span class="step-label">${err.message}</span></div>`;
+      }
+      setTimeout(() => window.location.reload(), 1000);
+    });
+  } catch (e) {
+    log.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+    if (btn) btn.disabled = false;
+  }
+}
+
 // ── Status polling ──────────────────────────────────────────────────────────
 
 (function() {
@@ -219,6 +241,8 @@ async function clientStop() {
       const cfgAlert = document.getElementById('config-changed');
       if (cfgAlert) {
         if (s.config_changed) {
+          const action = s.mode === 'client' ? 'Reconnect' : 'Restart';
+          cfgAlert.textContent = 'Configuration has changed. ' + action + ' to apply.';
           cfgAlert.classList.remove('hidden');
         } else {
           cfgAlert.classList.add('hidden');

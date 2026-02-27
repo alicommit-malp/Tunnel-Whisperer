@@ -96,8 +96,8 @@ runcmd:
     }
     CADDYEOF
 
-  # Install Xray
-  - bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+  # Install Xray (pinned version for reproducibility)
+  - bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install --version {{.XrayVersion}}
 
   # Firewall — only 80 and 443
   - ufw default deny incoming

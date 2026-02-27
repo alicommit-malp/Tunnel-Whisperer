@@ -24,6 +24,11 @@ var digitaloceanTfTmpl string
 //go:embed install-script.sh.tmpl
 var installScriptTmpl string
 
+// Pinned versions — keeps relay setup reproducible even when upstream releases new versions.
+const (
+	XrayVersion = "v1.8.24" // must stay compatible with the xray-core in go.mod
+)
+
 // Config holds all values needed to render relay files.
 type Config struct {
 	Domain        string
@@ -33,6 +38,7 @@ type Config struct {
 	PublicKey     string
 	Provider      string // "aws", "hetzner", or "digitalocean"
 	CaddyCertsB64 string // base64-encoded tar.gz of saved Caddy TLS certs (optional)
+	XrayVersion   string // populated automatically from the pinned constant
 }
 
 var providerTemplates = map[string]string{
@@ -43,6 +49,7 @@ var providerTemplates = map[string]string{
 
 // Generate renders cloud-init.yaml and the selected provider's main.tf into dir.
 func Generate(dir string, cfg Config) error {
+	cfg.XrayVersion = XrayVersion
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating relay directory: %w", err)
 	}
@@ -70,6 +77,7 @@ func Generate(dir string, cfg Config) error {
 
 // GenerateInstallScript renders the manual install bash script with the given config.
 func GenerateInstallScript(cfg Config) (string, error) {
+	cfg.XrayVersion = XrayVersion
 	return render("install-script.sh", installScriptTmpl, cfg)
 }
 

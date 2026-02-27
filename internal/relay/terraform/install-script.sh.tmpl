@@ -49,9 +49,9 @@ cat > /etc/caddy/Caddyfile <<'CADDYEOF'
 }
 CADDYEOF
 
-# ── Install Xray ────────────────────────────────────────────
-echo "[4/7] Installing Xray..."
-bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+# ── Install Xray (pinned version for reproducibility) ──────
+echo "[4/7] Installing Xray {{.XrayVersion}}..."
+bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install --version {{.XrayVersion}}
 
 mkdir -p /usr/local/etc/xray
 cat > /usr/local/etc/xray/config.json <<'XRAYEOF'

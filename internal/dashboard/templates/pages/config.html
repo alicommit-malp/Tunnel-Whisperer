@@ -6,7 +6,7 @@
     <h2>Log Level</h2>
     <span class="badge {{if eq .LogLevel "debug"}}badge-yellow{{else if eq .LogLevel "warn"}}badge-yellow{{else if eq .LogLevel "error"}}badge-red{{else}}badge-dim{{end}}" id="log-level-badge">{{.LogLevel}}</span>
   </div>
-  <p class="text-dim mb-16">Controls verbosity of application and Xray logs. Takes effect on restart.</p>
+  <p class="text-dim mb-16">Controls verbosity of application and Xray logs. Takes effect on {{if eq .Mode "client"}}reconnect{{else}}restart{{end}}.</p>
   <div class="form-group">
     <label>Level</label>
     <select id="log-level-select">
@@ -30,7 +30,7 @@
     <span class="badge badge-dim" id="proxy-badge">none</span>
     {{end}}
   </div>
-  <p class="text-dim mb-16">Route all connections through a SOCKS5 or HTTP proxy. Takes effect on next start.</p>
+  <p class="text-dim mb-16">Route all connections through a SOCKS5 or HTTP proxy. Takes effect on next {{if eq .Mode "client"}}reconnect{{else}}start{{end}}.</p>
   <div class="form-group">
     <label>Proxy URL</label>
     <input type="text" id="proxy-url" placeholder="socks5://user:pass@host:port" value="{{.Proxy}}" autocomplete="off">
@@ -53,6 +53,6 @@
 {{end}}
 
 {{define "scripts"}}
-<script>var serviceRunning = {{.Running}};</script>
+<script>var serviceRunning = {{.Running}}; var serviceMode = '{{.Mode}}';</script>
 <script src="/static/js/config.js"></script>
 {{end}}

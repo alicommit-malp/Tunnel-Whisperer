@@ -211,6 +211,34 @@ func (o *Ops) StopClient(progress ProgressFunc) error {
 	return o.cli.Stop(progress)
 }
 
+// ReconnectClient stops, reloads config, and starts the client again.
+// Progress events are emitted as a single continuous SSE stream.
+func (o *Ops) ReconnectClient(progress ProgressFunc) error {
+	if progress == nil {
+		progress = func(ProgressEvent) {}
+	}
+
+	// Wrap Stop's progress so its final "completed" event doesn't trigger
+	// SSE terminal detection.
+	stopProgress := func(e ProgressEvent) {
+		e.Total++
+		progress(e)
+	}
+
+	if err := o.cli.Stop(stopProgress); err != nil {
+		return err
+	}
+
+	o.ReloadConfig()
+
+	// Apply the new log level from config.
+	if cfg := o.Config(); cfg.LogLevel != "" {
+		logging.SetLevel(cfg.LogLevel)
+	}
+
+	return o.cli.Start(o, progress)
+}
+
 // ClientStatus returns the client lifecycle state.
 func (o *Ops) ClientStatus() ClientStatus {
 	return o.cli.Status()
