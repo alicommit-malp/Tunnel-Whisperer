@@ -71,7 +71,10 @@ func vlessOutbound(cfg config.XrayConfig, proxyURL string) map[string]interface{
 		},
 	}
 	if proxyURL != "" {
-		out["proxySettings"] = map[string]interface{}{"tag": "proxy-out"}
+		ss := out["streamSettings"].(map[string]interface{})
+		ss["sockopt"] = map[string]interface{}{
+			"dialerProxy": "proxy-out",
+		}
 	}
 	return out
 }

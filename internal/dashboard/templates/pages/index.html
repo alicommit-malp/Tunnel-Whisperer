@@ -223,7 +223,7 @@
     {{if .Config.Client.Tunnels}}
     <div class="kv">
       {{range .Config.Client.Tunnels}}
-      <span class="kv-label">localhost:{{.LocalPort}}</span>
+      <span class="kv-label copyable" onclick="copyText('localhost:{{.LocalPort}}', this)" title="Click to copy">localhost:{{.LocalPort}}</span>
       <span class="kv-value">{{.RemoteHost}}:{{.RemotePort}}</span>
       {{end}}
     </div>

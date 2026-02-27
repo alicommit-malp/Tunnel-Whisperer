@@ -158,6 +158,8 @@ input:focus, select:focus { outline: none; border-color: var(--accent); box-shad
 /* ── Key-value pairs ─────────────────────────────────────────────────── */
 .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; }
 .kv-label { color: var(--text-dim); font-size: 13px; }
+.kv-label.copyable { cursor: pointer; }
+.kv-label.copyable:hover { color: var(--accent); }
 .kv-value { font-family: var(--mono); font-size: 13px; }
 
 /* ── Status indicators (up/down/error) ────────────────────────────────── */

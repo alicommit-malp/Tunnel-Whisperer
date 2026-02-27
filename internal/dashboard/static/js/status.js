@@ -207,6 +207,14 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
+function copyText(text, el) {
+  navigator.clipboard.writeText(text).then(() => {
+    const orig = el.textContent;
+    el.textContent = 'copied!';
+    setTimeout(() => { el.textContent = orig; }, 1000);
+  });
+}
+
 // ── Config zip upload ────────────────────────────────────────────────────────
 
 (function() {
