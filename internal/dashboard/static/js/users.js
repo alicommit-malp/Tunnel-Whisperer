@@ -128,6 +128,77 @@ async function relayUsersRequest(endpoint, body) {
   }
 }
 
+// ── Search & Pagination ─────────────────────────────────────────────────────
+
+(function() {
+  const PAGE_SIZE = 10;
+  let currentPage = 1;
+
+  const searchInput = $('#user-search');
+  const table = $('#users-table');
+  if (!searchInput || !table) return;
+
+  const tbody = table.querySelector('tbody');
+  const allRows = Array.from(tbody.querySelectorAll('tr'));
+
+  function filterAndPaginate() {
+    const query = searchInput.value.toLowerCase().trim();
+
+    // Filter rows by name (first td).
+    const matching = [];
+    allRows.forEach(row => {
+      const name = row.querySelector('td').textContent.toLowerCase();
+      if (name.includes(query)) {
+        matching.push(row);
+      }
+    });
+
+    // Paginate.
+    const totalPages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
+    if (currentPage > totalPages) currentPage = totalPages;
+
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+
+    allRows.forEach(row => row.style.display = 'none');
+    matching.forEach((row, i) => {
+      row.style.display = (i >= start && i < end) ? '' : 'none';
+    });
+
+    renderPagination(matching.length, totalPages);
+  }
+
+  function renderPagination(total, totalPages) {
+    const el = $('#pagination');
+    if (!el) return;
+
+    if (totalPages <= 1) {
+      el.innerHTML = '';
+      return;
+    }
+
+    let html = '';
+    html += `<button class="btn btn-sm" ${currentPage <= 1 ? 'disabled' : ''} onclick="goToPage(${currentPage - 1})">&laquo; Prev</button>`;
+    for (let i = 1; i <= totalPages; i++) {
+      html += `<button class="btn btn-sm${i === currentPage ? ' active' : ''}" onclick="goToPage(${i})">${i}</button>`;
+    }
+    html += `<button class="btn btn-sm" ${currentPage >= totalPages ? 'disabled' : ''} onclick="goToPage(${currentPage + 1})">Next &raquo;</button>`;
+    el.innerHTML = html;
+  }
+
+  window.goToPage = function(n) {
+    currentPage = n;
+    filterAndPaginate();
+  };
+
+  searchInput.addEventListener('input', () => {
+    currentPage = 1;
+    filterAndPaginate();
+  });
+
+  filterAndPaginate();
+})();
+
 // ── Online status polling ───────────────────────────────────────────────────
 
 async function pollOnlineStatus() {

@@ -28,8 +28,11 @@
 </div>
 
 {{if .Users}}
+<div class="search-bar mb-16">
+  <input type="text" id="user-search" placeholder="Search users..." autocomplete="off">
+</div>
 <div class="card">
-  <table>
+  <table id="users-table">
     <thead>
       <tr>
         <th>Name</th>
@@ -70,6 +73,7 @@
     </tbody>
   </table>
 </div>
+<div class="pagination" id="pagination"></div>
 {{else}}
 <div class="card">
   <p class="text-dim">No users yet. Create one to grant tunnel access.</p>

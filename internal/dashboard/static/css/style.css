@@ -478,6 +478,14 @@ pre {
 /* ── Upload area compact variant ───────────────────────────────── */
 .upload-area-sm { padding: 16px; }
 
+/* ── Search bar ───────────────────────────────────────────────── */
+.search-bar input { width: 100%; }
+
+/* ── Pagination ───────────────────────────────────────────────── */
+.pagination { display: flex; gap: 4px; justify-content: center; margin-top: 16px; }
+.pagination button { min-width: 32px; }
+.pagination button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
 /* ── Responsive: stack on small screens ────────────────────────── */
 @media (max-width: 900px) {
   .dash-grid { grid-template-columns: 1fr; }
