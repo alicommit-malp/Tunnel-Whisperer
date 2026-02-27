@@ -1069,6 +1069,14 @@ func (o *Ops) sshThroughServerTunnel(cfg *config.Config, fn func(*gossh.Client) 
 	return fn(client)
 }
 
+// InvalidateOnlineCache clears the online status cache so the next
+// GetOnlineUsers call triggers a fresh query to the relay.
+func (o *Ops) InvalidateOnlineCache() {
+	o.onlineMu.Lock()
+	o.onlinePoll = time.Time{}
+	o.onlineMu.Unlock()
+}
+
 // GetOnlineUsers returns a cached map of UUID → online status.
 // The cache is refreshed via the server's running Xray tunnel when stale.
 // Returns nil if no relay is configured or the server tunnel isn't running.

@@ -241,6 +241,46 @@ Override with `TW_CONFIG_DIR` environment variable.
 - **Relay isolation:** SSH on the relay listens on `127.0.0.1` only. The firewall exposes only ports 80 (ACME) and 443 (HTTPS). The relay never sees plaintext — it's just a transport passthrough.
 - **Per-user UUIDs:** Each client has a unique Xray UUID registered on the relay, allowing individual revocation at the transport layer.
 
+### Encryption Details
+
+#### Transport Encryption
+
+- All traffic is encrypted with **TLS 1.3** (HTTPS) — the same standard used by online banking and healthcare portals.
+- TLS certificates are automatically provisioned and renewed via **Let's Encrypt** (ACME protocol).
+- Traffic is served over standard **HTTPS (port 443)** — indistinguishable from normal web traffic to firewalls and network inspectors.
+
+#### Tunnel Protocol
+
+- Uses the **VLESS protocol** over **SplitHTTP transport** — traffic is split across multiple standard HTTP connections, making it resilient in restrictive network environments.
+- Each user authenticates with a unique **UUID token** — no shared credentials.
+- The relay server cannot read application-layer data; it only forwards encrypted streams.
+
+#### Authentication & Key Management
+
+- All SSH connections use **Ed25519 public key authentication** — no passwords, no brute-force attack surface.
+- Each user receives an individual **Ed25519 key pair** (256-bit elliptic curve).
+- SSH port forwarding is restricted per user via `permitopen` directives — users can only reach the specific services they are authorized for.
+
+#### Network Hardening
+
+- The relay VM firewall (UFW) allows **only ports 80 and 443** — no SSH exposed to the internet.
+- SSH on the relay listens on **localhost only** (127.0.0.1) — accessible only through the encrypted tunnel.
+- All management operations (user provisioning, configuration changes) happen through the encrypted tunnel, never over unprotected channels.
+
+#### Encryption Layers Summary
+
+| Layer              | Standard                      | Purpose                                                      |
+| ------------------ | ----------------------------- | ------------------------------------------------------------ |
+| TLS 1.3            | Industry standard             | Encrypts all data in transit                                 |
+| VLESS + SplitHTTP  | Tunnel protocol               | Authenticates users, obfuscates traffic patterns             |
+| Ed25519 SSH        | Elliptic curve cryptography   | Authenticates tunnel endpoints, restricts per-user access    |
+
+#### Compliance-Relevant Properties
+
+- Zero plaintext data leaves the local network — all data is encrypted before it reaches the public internet.
+- No credentials or keys are stored on the relay — compromise of the relay does not expose user data.
+- Supports the principle of least privilege: each user can only forward to explicitly allowed ports and services.
+
 ---
 
 ## Market Comparison

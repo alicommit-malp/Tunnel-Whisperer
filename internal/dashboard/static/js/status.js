@@ -126,6 +126,33 @@ async function clientStop() {
         const tunCls = s.client.tunnel ? 'status-up' : 'status-down';
         setStatus('cli-tunnel', tunText, s.client.tunnel_error ? 'status-error' : tunCls);
       }
+
+      // Update Clients card online status.
+      const onlineSet = new Set(s.online || []);
+      const onlineCount = onlineSet.size;
+
+      const countEl = document.querySelector('[data-bind="online-count"]');
+      if (countEl) {
+        countEl.textContent = onlineCount + ' online';
+        countEl.className = 'badge ' + (onlineCount > 0 ? 'badge-green' : 'badge-dim');
+      }
+
+      const userCountEl = document.querySelector('[data-bind="user-count"]');
+      if (userCountEl && s.user_count !== undefined) {
+        userCountEl.textContent = s.user_count + ' total';
+      }
+
+      document.querySelectorAll('#user-list .user-row[data-uuid]').forEach(row => {
+        const uuid = row.dataset.uuid;
+        const badge = row.querySelector('.user-online-badge');
+        if (!badge) return;
+        if (onlineSet.has(uuid)) {
+          badge.className = 'badge badge-green user-online-badge';
+          badge.classList.remove('hidden');
+        } else {
+          badge.className = 'badge badge-dim user-online-badge hidden';
+        }
+      });
     } catch (_) {}
   }
 

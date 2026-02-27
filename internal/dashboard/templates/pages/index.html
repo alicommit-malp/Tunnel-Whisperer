@@ -86,17 +86,21 @@
     <div class="card-header">
       <h2>Clients</h2>
       <div class="card-actions">
-        <span class="badge badge-dim">{{.UserCount}}</span>
+        <span class="badge {{if .OnlineCount}}badge-green{{else}}badge-dim{{end}}" data-bind="online-count">{{if .OnlineCount}}{{.OnlineCount}} online{{else}}0 online{{end}}</span>
+        <span class="badge badge-dim" data-bind="user-count">{{.UserCount}} total</span>
         <a href="/users" class="settings-btn" title="Manage Users">&#9881;</a>
       </div>
     </div>
 
     {{if .Users}}
-    <div class="user-list">
+    <div class="user-list" id="user-list">
       {{range .Users}}
-      <div class="user-row">
+      <div class="user-row" data-uuid="{{.UUID}}">
         <a href="/users/{{.Name}}">{{.Name}}</a>
-        <span class="text-dim text-mono">{{len .Tunnels}} tunnel{{if ne (len .Tunnels) 1}}s{{end}}</span>
+        <span>
+          <span class="badge {{if .Online}}badge-green{{else}}badge-dim hidden{{end}} user-online-badge">online</span>
+          <span class="text-dim text-mono">{{len .Tunnels}} tunnel{{if ne (len .Tunnels) 1}}s{{end}}</span>
+        </span>
       </div>
       {{end}}
     </div>

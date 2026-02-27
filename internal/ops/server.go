@@ -76,6 +76,14 @@ func (m *serverManager) Start(o *Ops, progress ProgressFunc) error {
 	if err != nil {
 		return fail(2, total, "SSH server", err)
 	}
+	sshServer.OnConnect = func(user string) {
+		slog.Info("client connected, refreshing online status", "user", user)
+		o.InvalidateOnlineCache()
+	}
+	sshServer.OnDisconnect = func(user string) {
+		slog.Info("client disconnected, refreshing online status", "user", user)
+		o.InvalidateOnlineCache()
+	}
 	go func() {
 		if err := sshServer.Run(); err != nil {
 			slog.Error("SSH server error", "error", err)

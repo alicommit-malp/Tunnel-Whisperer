@@ -21,6 +21,8 @@ type Server struct {
 	Port           int
 	HostKeyDir     string
 	AuthorizedKeys string
+	OnConnect      func(user string) // called after successful SSH authentication
+	OnDisconnect   func(user string) // called when an SSH connection closes
 	config         *gossh.ServerConfig
 	listener       net.Listener
 }
@@ -194,7 +196,17 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 	defer sshConn.Close()
 
-	slog.Debug("SSH connection established", "remote", sshConn.RemoteAddr(), "client_version", sshConn.ClientVersion(), "user", sshConn.User())
+	user := sshConn.User()
+	slog.Debug("SSH connection established", "remote", sshConn.RemoteAddr(), "client_version", sshConn.ClientVersion(), "user", user)
+
+	if s.OnConnect != nil {
+		s.OnConnect(user)
+	}
+	defer func() {
+		if s.OnDisconnect != nil {
+			s.OnDisconnect(user)
+		}
+	}()
 
 	go gossh.DiscardRequests(reqs)
 

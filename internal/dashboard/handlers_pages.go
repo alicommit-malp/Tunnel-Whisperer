@@ -57,12 +57,23 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	srvStatus := s.ops.ServerStatus()
 	cliStatus := s.ops.ClientStatus()
 
+	// Populate online status.
+	online := s.ops.GetOnlineUsers()
+	var onlineCount int
+	for i := range users {
+		if users[i].UUID != "" && online[users[i].UUID] {
+			users[i].Online = true
+			onlineCount++
+		}
+	}
+
 	data := struct {
 		pageData
 		Config       *config.Config
 		ConfigPath   string
 		Relay        ops.RelayStatus
 		UserCount    int
+		OnlineCount  int
 		Users        []ops.UserInfo
 		ServerStatus ops.ServerStatus
 		ClientStatus ops.ClientStatus
@@ -72,6 +83,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		ConfigPath:   config.FilePath(),
 		Relay:        relay,
 		UserCount:    len(users),
+		OnlineCount:  onlineCount,
 		Users:        cappedUsers(users, 3),
 		ServerStatus: srvStatus,
 		ClientStatus: cliStatus,

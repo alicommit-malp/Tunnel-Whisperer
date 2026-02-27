@@ -39,6 +39,13 @@ func (s *Server) apiStatus(w http.ResponseWriter, r *http.Request) {
 
 	if mode == "server" {
 		resp["server"] = s.ops.ServerStatus()
+
+		online := s.ops.GetOnlineUsers()
+		onlineUUIDs := make([]string, 0, len(online))
+		for uuid := range online {
+			onlineUUIDs = append(onlineUUIDs, uuid)
+		}
+		resp["online"] = onlineUUIDs
 	}
 	if mode == "client" {
 		resp["client"] = s.ops.ClientStatus()
