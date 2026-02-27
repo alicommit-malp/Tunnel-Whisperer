@@ -96,6 +96,7 @@ func (s *Server) routes() {
 	// REST API — write.
 	s.mux.HandleFunc("/api/mode", s.apiSetMode)
 	s.mux.HandleFunc("/api/proxy", s.apiSetProxy)
+	s.mux.HandleFunc("/api/log-level", s.apiSetLogLevel)
 	s.mux.HandleFunc("/api/relay/test-creds", s.apiTestCreds)
 	s.mux.HandleFunc("/api/relay/provision", s.apiProvisionRelay)
 	s.mux.HandleFunc("/api/relay/destroy", s.apiDestroyRelay)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tunnelwhisperer/tw/internal/config"
+	"github.com/tunnelwhisperer/tw/internal/logging"
 )
 
 // ProgressEvent describes one step in a long-running operation.
@@ -124,6 +125,21 @@ func (o *Ops) SetProxy(proxyURL string) error {
 	return config.Save(cfg)
 }
 
+// SetLogLevel validates and persists the log level to config.
+// Takes effect on next server/client restart.
+func (o *Ops) SetLogLevel(level string) error {
+	switch level {
+	case "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("invalid log level: %q (must be debug, info, warn, or error)", level)
+	}
+	o.mu.Lock()
+	o.cfg.LogLevel = level
+	cfg := o.cfg
+	o.mu.Unlock()
+	return config.Save(cfg)
+}
+
 // StartServer starts all server components.
 func (o *Ops) StartServer(progress ProgressFunc) error {
 	return o.srv.Start(o, progress)
@@ -169,6 +185,11 @@ func (o *Ops) RestartServer(progress ProgressFunc) error {
 	o.srv.mu.Unlock()
 
 	o.ReloadConfig()
+
+	// Apply the new log level from config (affects slog + Xray).
+	if cfg := o.Config(); cfg.LogLevel != "" {
+		logging.SetLevel(cfg.LogLevel)
+	}
 
 	// Start's progress passes through directly — its final event is the
 	// true terminal that closes the SSE session.

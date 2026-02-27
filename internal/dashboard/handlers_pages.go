@@ -255,16 +255,23 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	running := string(s.ops.ServerStatus().State) == "running" ||
 		string(s.ops.ClientStatus().State) == "running"
 
+	logLevel := cfg.LogLevel
+	if logLevel == "" {
+		logLevel = "info"
+	}
+
 	data := struct {
 		pageData
 		ConfigPath string
 		ConfigYAML string
+		LogLevel   string
 		Proxy      string
 		Running    bool
 	}{
 		pageData:   pageData{Title: "Config", Active: "config", Mode: mode},
 		ConfigPath: config.FilePath(),
 		ConfigYAML: string(cfgYAML),
+		LogLevel:   logLevel,
 		Proxy:      cfg.Proxy,
 		Running:    running,
 	}

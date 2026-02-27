@@ -3,6 +3,26 @@
 
 <div class="card mb-16">
   <div class="card-header">
+    <h2>Log Level</h2>
+    <span class="badge {{if eq .LogLevel "debug"}}badge-yellow{{else if eq .LogLevel "warn"}}badge-yellow{{else if eq .LogLevel "error"}}badge-red{{else}}badge-dim{{end}}" id="log-level-badge">{{.LogLevel}}</span>
+  </div>
+  <p class="text-dim mb-16">Controls verbosity of application and Xray logs. Takes effect on restart.</p>
+  <div class="form-group">
+    <label>Level</label>
+    <select id="log-level-select">
+      <option value="debug" {{if eq .LogLevel "debug"}}selected{{end}}>debug</option>
+      <option value="info" {{if eq .LogLevel "info"}}selected{{end}}>info</option>
+      <option value="warn" {{if eq .LogLevel "warn"}}selected{{end}}>warn</option>
+      <option value="error" {{if eq .LogLevel "error"}}selected{{end}}>error</option>
+    </select>
+  </div>
+  <button class="btn btn-primary" id="btn-log-level-save" onclick="saveLogLevel()">Save</button>
+  <div id="log-level-error" class="alert alert-error mt-16 hidden"></div>
+  <div id="log-level-success" class="alert alert-success mt-16 hidden"></div>
+</div>
+
+<div class="card mb-16">
+  <div class="card-header">
     <h2>Proxy</h2>
     {{if .Proxy}}
     <span class="badge badge-green" id="proxy-badge">configured</span>

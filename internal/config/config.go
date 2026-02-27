@@ -13,11 +13,12 @@ import (
 
 // Config holds all Tunnel Whisperer settings.
 type Config struct {
-	Mode   string       `yaml:"mode,omitempty"`  // "server" or "client"
-	Proxy  string       `yaml:"proxy,omitempty"` // e.g. "socks5://user:pass@host:port" or "http://host:port"
-	Xray   XrayConfig   `yaml:"xray"`
-	Server ServerConfig `yaml:"server"`
-	Client ClientConfig `yaml:"client"`
+	Mode     string       `yaml:"mode,omitempty"`      // "server" or "client"
+	LogLevel string       `yaml:"log_level,omitempty"` // debug, info, warn, error
+	Proxy    string       `yaml:"proxy,omitempty"`     // e.g. "socks5://user:pass@host:port" or "http://host:port"
+	Xray     XrayConfig   `yaml:"xray"`
+	Server   ServerConfig `yaml:"server"`
+	Client   ClientConfig `yaml:"client"`
 }
 
 // XrayConfig is the shared transport layer (both server and client).

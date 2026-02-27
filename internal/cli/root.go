@@ -17,6 +17,18 @@ var rootCmd = &cobra.Command{
 ports across separated private networks. It encapsulates traffic in standard
 HTTPS/WebSocket to traverse strict firewalls and DPI.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		if cmd.Flags().Changed("log-level") {
+			// Explicit flag — persist to config so the dashboard stays in sync.
+			if cfg, err := config.Load(); err == nil {
+				cfg.LogLevel = logLevel
+				config.Save(cfg)
+			}
+		} else {
+			// No flag — use config's log level if set.
+			if cfg, err := config.Load(); err == nil && cfg.LogLevel != "" {
+				logLevel = cfg.LogLevel
+			}
+		}
 		logging.Setup(logLevel)
 	},
 }

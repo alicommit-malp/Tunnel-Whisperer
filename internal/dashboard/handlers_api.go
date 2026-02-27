@@ -522,6 +522,30 @@ func (s *Server) apiSetProxy(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]string{"status": "ok", "proxy": req.Proxy})
 }
 
+// ── Log level ────────────────────────────────────────────────────────────────
+
+func (s *Server) apiSetLogLevel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		LogLevel string `json:"log_level"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.ops.SetLogLevel(req.LogLevel); err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	jsonOK(w, map[string]string{"status": "ok", "log_level": req.LogLevel})
+}
+
 // ── Log streaming ───────────────────────────────────────────────────────────
 
 func (s *Server) apiLogs(w http.ResponseWriter, r *http.Request) {
