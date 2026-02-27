@@ -142,17 +142,30 @@ async function clientStop() {
         userCountEl.textContent = s.user_count + ' total';
       }
 
-      document.querySelectorAll('#user-list .user-row[data-uuid]').forEach(row => {
-        const uuid = row.dataset.uuid;
-        const badge = row.querySelector('.user-online-badge');
-        if (!badge) return;
-        if (onlineSet.has(uuid)) {
-          badge.className = 'badge badge-green user-online-badge';
-          badge.classList.remove('hidden');
-        } else {
-          badge.className = 'badge badge-dim user-online-badge hidden';
-        }
-      });
+      const userList = document.getElementById('user-list');
+      if (userList) {
+        const rows = Array.from(userList.querySelectorAll('.user-row[data-uuid]'));
+        rows.forEach(row => {
+          const uuid = row.dataset.uuid;
+          const badge = row.querySelector('.user-online-badge');
+          if (!badge) return;
+          if (onlineSet.has(uuid)) {
+            badge.className = 'badge badge-green user-online-badge';
+            badge.classList.remove('hidden');
+          } else {
+            badge.className = 'badge badge-dim user-online-badge hidden';
+          }
+        });
+
+        // Re-sort: online users first, then alphabetical.
+        rows.sort((a, b) => {
+          const aOn = onlineSet.has(a.dataset.uuid) ? 0 : 1;
+          const bOn = onlineSet.has(b.dataset.uuid) ? 0 : 1;
+          if (aOn !== bOn) return aOn - bOn;
+          return a.textContent.trim().localeCompare(b.textContent.trim());
+        });
+        rows.forEach(row => userList.appendChild(row));
+      }
     } catch (_) {}
   }
 

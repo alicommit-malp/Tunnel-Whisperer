@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/tunnelwhisperer/tw/internal/config"
@@ -72,6 +73,14 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		registered = append(registered, users[i])
 	}
 
+	// Online users first.
+	sort.Slice(registered, func(i, j int) bool {
+		if registered[i].Online != registered[j].Online {
+			return registered[i].Online
+		}
+		return registered[i].Name < registered[j].Name
+	})
+
 	data := struct {
 		pageData
 		Config       *config.Config
@@ -89,7 +98,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		Relay:        relay,
 		UserCount:    len(registered),
 		OnlineCount:  onlineCount,
-		Users:        cappedUsers(registered, 3),
+		Users:        registered,
 		ServerStatus: srvStatus,
 		ClientStatus: cliStatus,
 	}
