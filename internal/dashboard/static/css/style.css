@@ -408,7 +408,8 @@ pre {
 
 .user-row:last-child { border-bottom: none; }
 
-.user-list-scroll {
+.user-list-scroll,
+.tunnel-list-scroll {
   max-height: 105px;
   overflow-y: auto;
   padding-right: 10px;

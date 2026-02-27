@@ -217,16 +217,21 @@
     <div class="card-header">
       <h2>Tunnels</h2>
       <div class="card-actions">
+        {{if eq .ClientStatus.State "running"}}
+        <span class="badge {{if .ClientStatus.Tunnel}}badge-green{{else}}badge-dim{{end}}" data-bind="tunnel-badge">{{if .ClientStatus.Tunnel}}connected{{else}}disconnected{{end}}</span>
+        {{end}}
         <span class="badge badge-dim">{{len .Config.Client.Tunnels}}</span>
       </div>
     </div>
 
     {{if .Config.Client.Tunnels}}
-    <div class="kv">
-      {{range .Config.Client.Tunnels}}
-      <span class="kv-label copyable" onclick="copyText('localhost:{{.LocalPort}}', this)" title="Click to copy">localhost:{{.LocalPort}}</span>
-      <span class="kv-value">{{.RemoteHost}}:{{.RemotePort}}</span>
-      {{end}}
+    <div class="tunnel-list-scroll">
+      <div class="kv">
+        {{range .Config.Client.Tunnels}}
+        <span class="kv-label copyable" onclick="copyText('localhost:{{.LocalPort}}', this)" title="Click to copy">localhost:{{.LocalPort}}</span>
+        <span class="kv-value">{{.RemoteHost}}:{{.RemotePort}}</span>
+        {{end}}
+      </div>
     </div>
     {{else}}
     <p class="text-dim">No tunnels configured.</p>

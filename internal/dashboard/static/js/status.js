@@ -162,6 +162,17 @@ async function clientStop() {
         setStatus('cli-tunnel', tunText, s.client.tunnel_error ? 'status-error' : tunCls);
         setError('cli-tunnel-error', s.client.tunnel_error || '');
         setError('cli-error', s.client.error || '');
+
+        const tunBadge = document.querySelector('[data-bind="tunnel-badge"]');
+        if (tunBadge) {
+          if (s.client.tunnel) {
+            tunBadge.textContent = 'connected';
+            tunBadge.className = 'badge badge-green';
+          } else {
+            tunBadge.textContent = 'disconnected';
+            tunBadge.className = 'badge badge-dim';
+          }
+        }
       }
 
       // Update Clients card online status.

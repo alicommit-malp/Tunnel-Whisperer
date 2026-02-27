@@ -59,6 +59,7 @@ func (ft *ForwardTunnel) LastError() string {
 func (ft *ForwardTunnel) Run() error {
 	ft.done = make(chan struct{})
 	backoff := time.Second * 2
+	attempt := 0
 
 	for {
 		select {
@@ -74,8 +75,10 @@ func (ft *ForwardTunnel) Run() error {
 			ft.connected = false
 			ft.lastErr = err.Error()
 			ft.mu.Unlock()
+			attempt++
 		} else {
 			backoff = time.Second * 2
+			attempt = 0
 		}
 
 		// Clean up before reconnecting.
@@ -85,12 +88,18 @@ func (ft *ForwardTunnel) Run() error {
 		case <-ft.done:
 			return nil
 		case <-time.After(backoff):
-			slog.Info("forward tunnel reconnecting", "backoff", backoff)
+			slog.Info("forward tunnel reconnecting", "backoff", backoff, "attempt", attempt)
 		}
 
-		// Exponential backoff: 2s → 4s → 8s → 16s → 30s (max).
-		backoff *= 2
-		if backoff > 30*time.Second {
+		// Gradual backoff: stay at each level for 4 attempts before escalating.
+		// 2s ×8, 4s ×4, 8s ×4, 16s ×4, then 30s forever.
+		if attempt >= 8 && backoff == 2*time.Second {
+			backoff = 4 * time.Second
+		} else if attempt >= 12 && backoff == 4*time.Second {
+			backoff = 8 * time.Second
+		} else if attempt >= 16 && backoff == 8*time.Second {
+			backoff = 16 * time.Second
+		} else if attempt >= 20 && backoff == 16*time.Second {
 			backoff = 30 * time.Second
 		}
 	}
