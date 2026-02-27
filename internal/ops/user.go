@@ -646,7 +646,7 @@ func withRelaySSH(cfg *config.Config, fn func(client *gossh.Client) error) error
 		return fmt.Errorf("initializing Xray: %w", err)
 	}
 	const tempPort = 59000
-	if err := xrayInstance.Start(tempPort, cfg.Server.RelaySSHPort); err != nil {
+	if err := xrayInstance.Start(tempPort, cfg.Server.RelaySSHPort, cfg.Proxy); err != nil {
 		return fmt.Errorf("starting Xray: %w", err)
 	}
 	defer xrayInstance.Close()

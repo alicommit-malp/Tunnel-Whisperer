@@ -158,6 +158,17 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Sort: online first, then registered before unregistered, then alphabetical.
+	sort.Slice(users, func(i, j int) bool {
+		if users[i].Online != users[j].Online {
+			return users[i].Online
+		}
+		if users[i].Active != users[j].Active {
+			return users[i].Active
+		}
+		return users[i].Name < users[j].Name
+	})
+
 	data := struct {
 		pageData
 		Users         []ops.UserInfo
@@ -238,10 +249,12 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		pageData
 		ConfigPath string
 		ConfigYAML string
+		Proxy      string
 	}{
 		pageData:   pageData{Title: "Config", Active: "config", Mode: mode},
 		ConfigPath: config.FilePath(),
 		ConfigYAML: string(cfgYAML),
+		Proxy:      cfg.Proxy,
 	}
 	s.renderPage(w, "config", data)
 }

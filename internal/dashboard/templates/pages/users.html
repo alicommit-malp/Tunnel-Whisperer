@@ -35,16 +35,16 @@
   <table id="users-table">
     <thead>
       <tr>
-        <th>Name</th>
+        <th class="sortable" data-sort="name">Name</th>
         <th>UUID</th>
-        <th>Tunnels</th>
-        <th>Status</th>
+        <th class="sortable" data-sort="tunnels">Tunnels</th>
+        <th class="sortable active" data-sort="status" data-dir="asc">Status</th>
         <th></th>
       </tr>
     </thead>
     <tbody>
       {{range .Users}}
-      <tr data-user="{{.Name}}" data-uuid="{{.UUID}}">
+      <tr data-user="{{.Name}}" data-uuid="{{.UUID}}" data-tunnels="{{len .Tunnels}}" data-status="{{if .Online}}0{{else if .Active}}1{{else}}2{{end}}">
         <td><a href="/users/{{.Name}}">{{.Name}}</a></td>
         <td class="text-mono text-dim">{{if .UUID}}{{slice .UUID 0 8}}...{{else}}—{{end}}</td>
         <td>{{len .Tunnels}}</td>

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"strconv"
 
 	"github.com/tunnelwhisperer/tw/internal/config"
 	"github.com/tunnelwhisperer/tw/internal/logging"
@@ -38,8 +40,9 @@ type xrayLog struct {
 }
 
 // vlessOutbound returns the VLESS outbound config block (shared by server and client).
-func vlessOutbound(cfg config.XrayConfig) map[string]interface{} {
-	return map[string]interface{}{
+// If proxyURL is non-empty, adds proxySettings to route through the proxy outbound.
+func vlessOutbound(cfg config.XrayConfig, proxyURL string) map[string]interface{} {
+	out := map[string]interface{}{
 		"tag":      "to-relay",
 		"protocol": "vless",
 		"settings": map[string]interface{}{
@@ -67,12 +70,74 @@ func vlessOutbound(cfg config.XrayConfig) map[string]interface{} {
 			},
 		},
 	}
+	if proxyURL != "" {
+		out["proxySettings"] = map[string]interface{}{"tag": "proxy-out"}
+	}
+	return out
+}
+
+// proxyOutbound parses a proxy URL and returns an Xray outbound config block.
+// Supported schemes: socks5 (→ "socks" protocol), http (→ "http" protocol).
+func proxyOutbound(proxyURL string) (map[string]interface{}, error) {
+	u, err := url.Parse(proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("parsing proxy URL: %w", err)
+	}
+
+	var protocol string
+	switch u.Scheme {
+	case "socks5":
+		protocol = "socks"
+	case "http":
+		protocol = "http"
+	default:
+		return nil, fmt.Errorf("unsupported proxy scheme %q (use socks5:// or http://)", u.Scheme)
+	}
+
+	host := u.Hostname()
+	port := 1080
+	if p := u.Port(); p != "" {
+		port, err = strconv.Atoi(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid proxy port %q: %w", p, err)
+		}
+	}
+
+	server := map[string]interface{}{
+		"address": host,
+		"port":    port,
+	}
+
+	if u.User != nil {
+		user := u.User.Username()
+		pass, _ := u.User.Password()
+		server["users"] = []map[string]interface{}{
+			{"user": user, "pass": pass},
+		}
+	}
+
+	return map[string]interface{}{
+		"tag":      "proxy-out",
+		"protocol": protocol,
+		"settings": map[string]interface{}{
+			"servers": []map[string]interface{}{server},
+		},
+	}, nil
 }
 
 // buildServerConfig generates the server-side Xray JSON config.
 // dokodemo-door listens on sshPort+1 and forwards to the relay's SSH port.
-func buildServerConfig(cfg config.XrayConfig, sshPort, relaySSHPort int) ([]byte, error) {
+func buildServerConfig(cfg config.XrayConfig, sshPort, relaySSHPort int, proxyURL string) ([]byte, error) {
 	listenPort := sshPort + 1
+
+	outbounds := []interface{}{vlessOutbound(cfg, proxyURL)}
+	if proxyURL != "" {
+		po, err := proxyOutbound(proxyURL)
+		if err != nil {
+			return nil, fmt.Errorf("proxy config: %w", err)
+		}
+		outbounds = append(outbounds, po)
+	}
 
 	xc := xrayConfig{
 		Log: xrayLog{Access: "none", LogLevel: logging.XrayLevel},
@@ -89,7 +154,7 @@ func buildServerConfig(cfg config.XrayConfig, sshPort, relaySSHPort int) ([]byte
 				},
 			},
 		},
-		Outbounds: []interface{}{vlessOutbound(cfg)},
+		Outbounds: outbounds,
 	}
 
 	return json.MarshalIndent(xc, "", "  ")
@@ -98,7 +163,16 @@ func buildServerConfig(cfg config.XrayConfig, sshPort, relaySSHPort int) ([]byte
 // buildClientConfig generates the client-side Xray JSON config.
 // dokodemo-door listens on ClientListenPort and forwards to the server's SSH
 // port on the relay (exposed via reverse tunnel).
-func buildClientConfig(cfg config.XrayConfig, clientCfg config.ClientConfig) ([]byte, error) {
+func buildClientConfig(cfg config.XrayConfig, clientCfg config.ClientConfig, proxyURL string) ([]byte, error) {
+	outbounds := []interface{}{vlessOutbound(cfg, proxyURL)}
+	if proxyURL != "" {
+		po, err := proxyOutbound(proxyURL)
+		if err != nil {
+			return nil, fmt.Errorf("proxy config: %w", err)
+		}
+		outbounds = append(outbounds, po)
+	}
+
 	xc := xrayConfig{
 		Log: xrayLog{Access: "none", LogLevel: logging.XrayLevel},
 		Inbounds: []interface{}{
@@ -114,7 +188,7 @@ func buildClientConfig(cfg config.XrayConfig, clientCfg config.ClientConfig) ([]
 				},
 			},
 		},
-		Outbounds: []interface{}{vlessOutbound(cfg)},
+		Outbounds: outbounds,
 		Routing: &xrayRouting{
 			Rules: []map[string]interface{}{
 				{
@@ -142,13 +216,13 @@ func New(cfg config.XrayConfig) (*Instance, error) {
 }
 
 // Start builds the server JSON config and starts the xray-core instance.
-func (x *Instance) Start(sshPort, relaySSHPort int) error {
-	configBytes, err := buildServerConfig(x.cfg, sshPort, relaySSHPort)
+func (x *Instance) Start(sshPort, relaySSHPort int, proxyURL string) error {
+	configBytes, err := buildServerConfig(x.cfg, sshPort, relaySSHPort, proxyURL)
 	if err != nil {
 		return fmt.Errorf("xray: building config: %w", err)
 	}
 
-	slog.Info("Xray starting", "relay", fmt.Sprintf("%s:%d", x.cfg.RelayHost, x.cfg.RelayPort), "path", x.cfg.Path, "xray_log_level", logging.XrayLevel)
+	slog.Info("Xray starting", "relay", fmt.Sprintf("%s:%d", x.cfg.RelayHost, x.cfg.RelayPort), "path", x.cfg.Path, "proxy", proxyURL, "xray_log_level", logging.XrayLevel)
 
 	instance, err := core.StartInstance("json", configBytes)
 	if err != nil {
@@ -173,13 +247,13 @@ func NewClient(cfg config.XrayConfig) (*Instance, error) {
 }
 
 // StartClient builds the client JSON config and starts the xray-core instance.
-func (x *Instance) StartClient(clientCfg config.ClientConfig) error {
-	configBytes, err := buildClientConfig(x.cfg, clientCfg)
+func (x *Instance) StartClient(clientCfg config.ClientConfig, proxyURL string) error {
+	configBytes, err := buildClientConfig(x.cfg, clientCfg, proxyURL)
 	if err != nil {
 		return fmt.Errorf("xray: building client config: %w", err)
 	}
 
-	slog.Info("Xray client starting", "relay", fmt.Sprintf("%s:%d", x.cfg.RelayHost, x.cfg.RelayPort), "path", x.cfg.Path, "xray_log_level", logging.XrayLevel)
+	slog.Info("Xray client starting", "relay", fmt.Sprintf("%s:%d", x.cfg.RelayHost, x.cfg.RelayPort), "path", x.cfg.Path, "proxy", proxyURL, "xray_log_level", logging.XrayLevel)
 
 	instance, err := core.StartInstance("json", configBytes)
 	if err != nil {

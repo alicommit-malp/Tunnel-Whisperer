@@ -1,6 +1,28 @@
 {{define "content"}}
 <h1>Configuration</h1>
 
+<div class="card mb-16">
+  <div class="card-header">
+    <h2>Proxy</h2>
+    {{if .Proxy}}
+    <span class="badge badge-green" id="proxy-badge">configured</span>
+    {{else}}
+    <span class="badge badge-dim" id="proxy-badge">none</span>
+    {{end}}
+  </div>
+  <p class="text-dim mb-16">Route all connections through a SOCKS5 or HTTP proxy. Takes effect on next start.</p>
+  <div class="form-group">
+    <label>Proxy URL</label>
+    <input type="text" id="proxy-url" placeholder="socks5://user:pass@host:port" value="{{.Proxy}}" autocomplete="off">
+  </div>
+  <div class="flex gap-8">
+    <button class="btn btn-primary" id="btn-proxy-save" onclick="saveProxy()">Save</button>
+    <button class="btn" onclick="clearProxy()">Clear</button>
+  </div>
+  <div id="proxy-error" class="alert alert-error mt-16 hidden"></div>
+  <div id="proxy-success" class="alert alert-success mt-16 hidden"></div>
+</div>
+
 <div class="card">
   <div class="card-header">
     <h2>config.yaml</h2>
@@ -8,4 +30,8 @@
   </div>
   <pre>{{.ConfigYAML}}</pre>
 </div>
+{{end}}
+
+{{define "scripts"}}
+<script src="/static/js/config.js"></script>
 {{end}}

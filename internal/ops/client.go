@@ -85,7 +85,7 @@ func (m *clientManager) Start(o *Ops, progress ProgressFunc) error {
 	if err != nil {
 		return fail(2, "Xray tunnel", err)
 	}
-	if err := xrayInstance.StartClient(cfg.Client); err != nil {
+	if err := xrayInstance.StartClient(cfg.Client, cfg.Proxy); err != nil {
 		return fail(2, "Xray tunnel", err)
 	}
 	m.mu.Lock()

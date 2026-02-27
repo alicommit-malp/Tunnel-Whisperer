@@ -110,7 +110,7 @@ func (m *serverManager) Start(o *Ops, progress ProgressFunc) error {
 		if err != nil {
 			return fail(step, total, "Xray tunnel", err)
 		}
-		if err := xrayInstance.Start(cfg.Server.SSHPort, cfg.Server.RelaySSHPort); err != nil {
+		if err := xrayInstance.Start(cfg.Server.SSHPort, cfg.Server.RelaySSHPort, cfg.Proxy); err != nil {
 			return fail(step, total, "Xray tunnel", err)
 		}
 		m.mu.Lock()

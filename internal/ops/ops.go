@@ -2,6 +2,7 @@ package ops
 
 import (
 	"fmt"
+	"net/url"
 	"sync"
 	"time"
 
@@ -95,6 +96,28 @@ func (o *Ops) SetMode(mode string) error {
 	}
 	o.mu.Lock()
 	o.cfg.Mode = mode
+	cfg := o.cfg
+	o.mu.Unlock()
+	return config.Save(cfg)
+}
+
+// SetProxy validates and persists the proxy URL to config.
+// An empty string clears the proxy. Takes effect on next server/client start.
+func (o *Ops) SetProxy(proxyURL string) error {
+	if proxyURL != "" {
+		u, err := url.Parse(proxyURL)
+		if err != nil {
+			return fmt.Errorf("invalid proxy URL: %w", err)
+		}
+		if u.Scheme != "socks5" && u.Scheme != "http" {
+			return fmt.Errorf("unsupported proxy scheme %q (use socks5:// or http://)", u.Scheme)
+		}
+		if u.Hostname() == "" {
+			return fmt.Errorf("proxy URL must include a host")
+		}
+	}
+	o.mu.Lock()
+	o.cfg.Proxy = proxyURL
 	cfg := o.cfg
 	o.mu.Unlock()
 	return config.Save(cfg)

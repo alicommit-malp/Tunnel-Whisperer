@@ -128,11 +128,13 @@ async function relayUsersRequest(endpoint, body) {
   }
 }
 
-// ── Search & Pagination ─────────────────────────────────────────────────────
+// ── Search, Sort & Pagination ────────────────────────────────────────────────
 
 (function() {
   const PAGE_SIZE = 10;
   let currentPage = 1;
+  let sortCol = 'status';
+  let sortDir = 'asc'; // asc = online/registered first
 
   const searchInput = $('#user-search');
   const table = $('#users-table');
@@ -140,11 +142,65 @@ async function relayUsersRequest(endpoint, body) {
 
   const tbody = table.querySelector('tbody');
   const allRows = Array.from(tbody.querySelectorAll('tr'));
+  const headers = table.querySelectorAll('th.sortable');
+
+  // ── Sort helpers ──
+
+  function getSortValue(row, col) {
+    switch (col) {
+      case 'name':    return row.dataset.user.toLowerCase();
+      case 'tunnels': return parseInt(row.dataset.tunnels) || 0;
+      case 'status':  return parseInt(row.dataset.status) || 0;
+      default:        return '';
+    }
+  }
+
+  function sortRows() {
+    allRows.sort((a, b) => {
+      const va = getSortValue(a, sortCol);
+      const vb = getSortValue(b, sortCol);
+      let cmp = 0;
+      if (typeof va === 'number') {
+        cmp = va - vb;
+      } else {
+        cmp = va.localeCompare(vb);
+      }
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    // Re-append in sorted order.
+    allRows.forEach(row => tbody.appendChild(row));
+  }
+
+  function updateHeaders() {
+    headers.forEach(th => {
+      th.classList.remove('active', 'sort-asc', 'sort-desc');
+      if (th.dataset.sort === sortCol) {
+        th.classList.add('active', sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+      }
+    });
+  }
+
+  headers.forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.sort;
+      if (sortCol === col) {
+        sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortCol = col;
+        sortDir = 'asc';
+      }
+      updateHeaders();
+      sortRows();
+      currentPage = 1;
+      filterAndPaginate();
+    });
+  });
+
+  // ── Filter & paginate ──
 
   function filterAndPaginate() {
     const query = searchInput.value.toLowerCase().trim();
 
-    // Filter rows by name (first td).
     const matching = [];
     allRows.forEach(row => {
       const name = row.querySelector('td').textContent.toLowerCase();
@@ -153,7 +209,6 @@ async function relayUsersRequest(endpoint, body) {
       }
     });
 
-    // Paginate.
     const totalPages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
     if (currentPage > totalPages) currentPage = totalPages;
 
@@ -196,6 +251,9 @@ async function relayUsersRequest(endpoint, body) {
     filterAndPaginate();
   });
 
+  // Initial sort & render.
+  updateHeaders();
+  sortRows();
   filterAndPaginate();
 })();
 
