@@ -30,11 +30,19 @@ func (s *Server) apiStatus(w http.ResponseWriter, r *http.Request) {
 	relay := s.ops.GetRelayStatus()
 	users, _ := s.ops.ListUsers()
 
+	// Count only registered users (those applied to the relay).
+	registeredCount := 0
+	for _, u := range users {
+		if u.Active {
+			registeredCount++
+		}
+	}
+
 	resp := map[string]interface{}{
 		"mode":       mode,
 		"version":    "0.1.0-dev",
 		"relay":      relay,
-		"user_count": len(users),
+		"user_count": registeredCount,
 	}
 
 	if mode == "server" {

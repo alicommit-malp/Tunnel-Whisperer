@@ -57,14 +57,19 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	srvStatus := s.ops.ServerStatus()
 	cliStatus := s.ops.ClientStatus()
 
-	// Populate online status.
+	// Filter to registered users only and populate online status.
 	online := s.ops.GetOnlineUsers()
+	var registered []ops.UserInfo
 	var onlineCount int
 	for i := range users {
+		if !users[i].Active {
+			continue
+		}
 		if users[i].UUID != "" && online[users[i].UUID] {
 			users[i].Online = true
 			onlineCount++
 		}
+		registered = append(registered, users[i])
 	}
 
 	data := struct {
@@ -82,9 +87,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		Config:       cfg,
 		ConfigPath:   config.FilePath(),
 		Relay:        relay,
-		UserCount:    len(users),
+		UserCount:    len(registered),
 		OnlineCount:  onlineCount,
-		Users:        cappedUsers(users, 3),
+		Users:        cappedUsers(registered, 3),
 		ServerStatus: srvStatus,
 		ClientStatus: cliStatus,
 	}
