@@ -4,18 +4,20 @@ async function saveProxy() {
   const input = $('#proxy-url');
   const url = input.value.trim();
 
-  if (!url) {
-    showProxyError('Enter a proxy URL or click Clear to remove.');
-    return;
-  }
-
   const btn = $('#btn-proxy-save');
   btn.disabled = true;
 
   try {
     await api.post('/api/proxy', { proxy: url });
-    showProxySuccess('Proxy saved. Takes effect on next start.');
+    const restart = typeof serviceRunning !== 'undefined' && serviceRunning
+      ? ' Restart to apply.' : '';
+    if (url) {
+      showProxySuccess('Proxy saved.' + restart);
+    } else {
+      showProxySuccess('Proxy cleared.' + restart);
+    }
     updateProxyBadge(url);
+    reloadConfigYAML();
   } catch (err) {
     showProxyError(err.message);
   } finally {
@@ -27,8 +29,11 @@ async function clearProxy() {
   try {
     await api.post('/api/proxy', { proxy: '' });
     $('#proxy-url').value = '';
-    showProxySuccess('Proxy cleared.');
+    const restart = typeof serviceRunning !== 'undefined' && serviceRunning
+      ? ' Restart to apply.' : '';
+    showProxySuccess('Proxy cleared.' + restart);
     updateProxyBadge('');
+    reloadConfigYAML();
   } catch (err) {
     showProxyError(err.message);
   }
@@ -63,5 +68,19 @@ function showProxySuccess(msg) {
   if (el) {
     el.textContent = msg;
     el.classList.remove('hidden');
+  }
+}
+
+// Reload the config YAML block without a full page refresh.
+async function reloadConfigYAML() {
+  try {
+    const resp = await fetch('/config');
+    const html = await resp.text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const fresh = doc.querySelector('pre');
+    const current = $('pre');
+    if (fresh && current) current.textContent = fresh.textContent;
+  } catch (_) {
+    // ignore — non-critical
   }
 }

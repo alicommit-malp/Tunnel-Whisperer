@@ -22,6 +22,9 @@ func init() {
 }
 
 func runConnect(cmd *cobra.Command, args []string) error {
+	if err := requireMode("client"); err != nil {
+		return err
+	}
 	fmt.Println("Connecting to relay...")
 
 	o, err := ops.New()

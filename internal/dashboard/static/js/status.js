@@ -41,6 +41,28 @@ async function serverStop() {
   }
 }
 
+async function serverRestart() {
+  const btn = $('#btn-server-restart');
+  if (btn) btn.disabled = true;
+
+  const log = $('#server-progress');
+  log.classList.remove('hidden');
+  log.innerHTML = '';
+
+  try {
+    const { session_id } = await api.post('/api/server/restart', {});
+    connectSSE(session_id, (ev) => renderProgressEvent(log, ev), (err) => {
+      if (err) {
+        log.innerHTML += `<div class="progress-step failed"><span class="step-label">${err.message}</span></div>`;
+      }
+      setTimeout(() => window.location.reload(), 1000);
+    });
+  } catch (e) {
+    log.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+    if (btn) btn.disabled = false;
+  }
+}
+
 // ── Client start/stop ────────────────────────────────────────────────────────
 
 async function clientStart() {
@@ -95,6 +117,17 @@ async function clientStop() {
     if (cls) el.classList.add(cls);
   }
 
+  function setError(bind, text) {
+    const el = document.querySelector(`[data-bind="${bind}"]`);
+    if (!el) return;
+    if (text) {
+      el.textContent = text;
+      el.classList.remove('hidden');
+    } else {
+      el.classList.add('hidden');
+    }
+  }
+
   function setBadge(bind, text) {
     const el = document.querySelector(`[data-bind="${bind}"]`);
     if (!el) return;
@@ -117,6 +150,8 @@ async function clientStop() {
         const tunText = s.server.tunnel ? 'up' : s.server.tunnel_error ? 'error' : 'down';
         const tunCls = s.server.tunnel ? 'status-up' : 'status-down';
         setStatus('srv-tunnel', tunText, s.server.tunnel_error ? 'status-error' : tunCls);
+        setError('srv-tunnel-error', s.server.tunnel_error || '');
+        setError('srv-error', s.server.error || '');
       }
 
       if (s.client) {
@@ -125,6 +160,8 @@ async function clientStop() {
         const tunText = s.client.tunnel ? 'up' : s.client.tunnel_error ? 'error' : 'down';
         const tunCls = s.client.tunnel ? 'status-up' : 'status-down';
         setStatus('cli-tunnel', tunText, s.client.tunnel_error ? 'status-error' : tunCls);
+        setError('cli-tunnel-error', s.client.tunnel_error || '');
+        setError('cli-error', s.client.error || '');
       }
 
       // Update Clients card online status.
@@ -165,6 +202,16 @@ async function clientStop() {
           return a.textContent.trim().localeCompare(b.textContent.trim());
         });
         rows.forEach(row => userList.appendChild(row));
+      }
+
+      // Config change indicator.
+      const cfgAlert = document.getElementById('config-changed');
+      if (cfgAlert) {
+        if (s.config_changed) {
+          cfgAlert.classList.remove('hidden');
+        } else {
+          cfgAlert.classList.add('hidden');
+        }
       }
     } catch (_) {}
   }

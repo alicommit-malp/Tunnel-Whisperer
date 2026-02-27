@@ -25,6 +25,9 @@ func init() {
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
+	if err := requireMode("server"); err != nil {
+		return err
+	}
 	fmt.Println("Starting Tunnel Whisperer server...")
 
 	o, err := ops.New()

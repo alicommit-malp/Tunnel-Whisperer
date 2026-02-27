@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
+	"github.com/tunnelwhisperer/tw/internal/config"
 	"github.com/tunnelwhisperer/tw/internal/logging"
 )
 
@@ -24,4 +27,25 @@ func init() {
 
 func Execute() error {
 	return rootCmd.Execute()
+}
+
+// requireMode returns an error if the current config mode doesn't match the
+// expected mode. This prevents running server-only commands in client mode
+// and vice versa.
+func requireMode(expected string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil // can't determine mode, let the command proceed
+	}
+	if cfg.Mode == "" {
+		return nil // mode not set yet, allow
+	}
+	if cfg.Mode != expected {
+		other := "server"
+		if expected == "server" {
+			other = "client"
+		}
+		return fmt.Errorf("this is a %s command, but tw is configured in %s mode", expected, other)
+	}
+	return nil
 }

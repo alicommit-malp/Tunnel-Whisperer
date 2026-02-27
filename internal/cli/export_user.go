@@ -30,6 +30,9 @@ func init() {
 }
 
 func runExportUser(cmd *cobra.Command, args []string) error {
+	if err := requireMode("server"); err != nil {
+		return err
+	}
 	name := args[0]
 
 	cfg, _ := config.Load()

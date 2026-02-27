@@ -23,6 +23,9 @@ func init() {
 }
 
 func runCreateUser(cmd *cobra.Command, args []string) error {
+	if err := requireMode("server"); err != nil {
+		return err
+	}
 	scanner := bufio.NewScanner(os.Stdin)
 
 	fmt.Println()

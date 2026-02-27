@@ -1,5 +1,11 @@
 {{define "content"}}
 
+{{if .ConfigChanged}}
+<div class="alert alert-warning mb-16" id="config-changed">Configuration has changed. Restart to apply.</div>
+{{else}}
+<div class="alert alert-warning mb-16 hidden" id="config-changed">Configuration has changed. Restart to apply.</div>
+{{end}}
+
 {{if eq .Mode "server"}}
 <!-- ── Server Mode — 3-column dashboard ──────────────────────────────── -->
 <div class="dash-grid">
@@ -23,12 +29,8 @@
       <span class="kv-value {{if .ServerStatus.Tunnel}}status-up{{else if .ServerStatus.TunnelError}}status-error{{else}}status-down{{end}}" data-bind="srv-tunnel">{{if .ServerStatus.Tunnel}}up{{else if .ServerStatus.TunnelError}}error{{else}}down{{end}}</span>
     </div>
 
-    {{if .ServerStatus.TunnelError}}
-    <div class="alert alert-error mt-16" data-bind="srv-tunnel-error">{{.ServerStatus.TunnelError}}</div>
-    {{end}}
-    {{if .ServerStatus.Error}}
-    <div class="alert alert-error mt-16" data-bind="srv-error">{{.ServerStatus.Error}}</div>
-    {{end}}
+    <div class="alert alert-error mt-16 {{if not .ServerStatus.TunnelError}}hidden{{end}}" data-bind="srv-tunnel-error">{{.ServerStatus.TunnelError}}</div>
+    <div class="alert alert-error mt-16 {{if not .ServerStatus.Error}}hidden{{end}}" data-bind="srv-error">{{.ServerStatus.Error}}</div>
 
     <div class="mt-16">
       {{if eq .ServerStatus.State "stopped"}}
@@ -38,7 +40,10 @@
           <a href="/relay/wizard" class="btn btn-primary btn-block">Provision Relay First</a>
         {{end}}
       {{else if eq .ServerStatus.State "running"}}
-        <button class="btn btn-danger btn-block" id="btn-server-stop" onclick="serverStop()">Stop Server</button>
+        <div class="flex gap-8">
+          <button class="btn btn-danger flex-1" id="btn-server-stop" onclick="serverStop()">Stop</button>
+          <button class="btn btn-primary flex-1" id="btn-server-restart" onclick="serverRestart()">Restart</button>
+        </div>
       {{else if eq .ServerStatus.State "error"}}
         <button class="btn btn-primary btn-block" id="btn-server-start" onclick="serverStart()">Retry Start</button>
       {{else}}
@@ -160,12 +165,8 @@
       <span class="kv-value {{if .ClientStatus.Tunnel}}status-up{{else if .ClientStatus.TunnelError}}status-error{{else}}status-down{{end}}" data-bind="cli-tunnel">{{if .ClientStatus.Tunnel}}up{{else if .ClientStatus.TunnelError}}error{{else}}down{{end}}</span>
     </div>
 
-    {{if .ClientStatus.TunnelError}}
-    <div class="alert alert-error mt-16" data-bind="cli-tunnel-error">{{.ClientStatus.TunnelError}}</div>
-    {{end}}
-    {{if .ClientStatus.Error}}
-    <div class="alert alert-error mt-16" data-bind="cli-error">{{.ClientStatus.Error}}</div>
-    {{end}}
+    <div class="alert alert-error mt-16 {{if not .ClientStatus.TunnelError}}hidden{{end}}" data-bind="cli-tunnel-error">{{.ClientStatus.TunnelError}}</div>
+    <div class="alert alert-error mt-16 {{if not .ClientStatus.Error}}hidden{{end}}" data-bind="cli-error">{{.ClientStatus.Error}}</div>
 
     <div class="mt-16">
       {{if eq .ClientStatus.State "stopped"}}

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,6 +50,17 @@ type Tunnel struct {
 	LocalPort  int    `yaml:"local_port"`
 	RemoteHost string `yaml:"remote_host"`
 	RemotePort int    `yaml:"remote_port"`
+}
+
+// Hash returns a SHA-256 hex digest of the YAML-serialised config.
+// Used to detect whether the config has changed since a service started.
+func (c *Config) Hash() string {
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return ""
+	}
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
 }
 
 // Default returns the default configuration.

@@ -27,6 +27,9 @@ func init() {
 }
 
 func runListUsers(cmd *cobra.Command, args []string) error {
+	if err := requireMode("server"); err != nil {
+		return err
+	}
 	cfg, _ := config.Load()
 	addr := fmt.Sprintf("localhost:%d", cfg.Server.APIPort)
 

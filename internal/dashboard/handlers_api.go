@@ -39,10 +39,11 @@ func (s *Server) apiStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := map[string]interface{}{
-		"mode":       mode,
-		"version":    "0.1.0-dev",
-		"relay":      relay,
-		"user_count": registeredCount,
+		"mode":           mode,
+		"version":        "0.1.0-dev",
+		"relay":          relay,
+		"user_count":     registeredCount,
+		"config_changed": s.ops.ConfigChanged(),
 	}
 
 	if mode == "server" {
@@ -129,6 +130,23 @@ func (s *Server) apiServerStop(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		if err := s.ops.StopServer(progress); err != nil {
 			slog.Error("server stop failed", "error", err)
+		}
+	}()
+
+	jsonOK(w, map[string]string{"session_id": sessionID})
+}
+
+func (s *Server) apiServerRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	sessionID, progress := s.sse.create()
+
+	go func() {
+		if err := s.ops.RestartServer(progress); err != nil {
+			slog.Error("server restart failed", "error", err)
 		}
 	}()
 

@@ -26,6 +26,7 @@ type clientManager struct {
 	mu       sync.Mutex
 	state    ServerState
 	lastErr  string
+	cfgHash  string // config hash at startup, for change detection
 	xrayInst *twxray.Instance
 	tunnel   *twssh.ForwardTunnel
 }
@@ -46,6 +47,10 @@ func (m *clientManager) Start(o *Ops, progress ProgressFunc) error {
 	}
 
 	cfg := o.Config()
+
+	m.mu.Lock()
+	m.cfgHash = cfg.Hash()
+	m.mu.Unlock()
 
 	fail := func(step int, label string, err error) error {
 		m.mu.Lock()

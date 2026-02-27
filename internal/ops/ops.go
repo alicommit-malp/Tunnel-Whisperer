@@ -133,6 +133,47 @@ func (o *Ops) StopServer(progress ProgressFunc) error {
 	return o.srv.Stop(progress)
 }
 
+// RestartServer stops, waits for the relay to release the port, reloads
+// config, and starts again. Progress events are emitted as a single
+// continuous SSE stream — Stop's final event is prevented from closing
+// the session so Start's events continue through the same connection.
+func (o *Ops) RestartServer(progress ProgressFunc) error {
+	if progress == nil {
+		progress = func(ProgressEvent) {}
+	}
+
+	// Wrap Stop's progress so its final "completed" event doesn't trigger
+	// SSE terminal detection (both server-side and client-side check
+	// Step == Total && Status == "completed").
+	stopProgress := func(e ProgressEvent) {
+		e.Total++
+		progress(e)
+	}
+
+	if err := o.srv.Stop(stopProgress); err != nil {
+		return err
+	}
+
+	// Keep state as "stopping" during the delay so the UI shows a disabled
+	// button instead of an active Start button.
+	o.srv.mu.Lock()
+	o.srv.state = StateStopping
+	o.srv.mu.Unlock()
+
+	progress(ProgressEvent{Label: "Waiting for relay to release port", Status: "running"})
+	time.Sleep(3 * time.Second)
+
+	o.srv.mu.Lock()
+	o.srv.state = StateStopped
+	o.srv.mu.Unlock()
+
+	o.ReloadConfig()
+
+	// Start's progress passes through directly — its final event is the
+	// true terminal that closes the SSE session.
+	return o.srv.Start(o, progress)
+}
+
 // ServerStatus returns the server lifecycle state.
 func (o *Ops) ServerStatus() ServerStatus {
 	return o.srv.Status()
@@ -151,4 +192,33 @@ func (o *Ops) StopClient(progress ProgressFunc) error {
 // ClientStatus returns the client lifecycle state.
 func (o *Ops) ClientStatus() ClientStatus {
 	return o.cli.Status()
+}
+
+// ConfigChanged reports whether the on-disk config differs from the config
+// that was active when the running server or client started.
+// Returns false if nothing is running.
+func (o *Ops) ConfigChanged() bool {
+	diskCfg, err := config.Load()
+	if err != nil {
+		return false
+	}
+	currentHash := diskCfg.Hash()
+
+	o.srv.mu.Lock()
+	srvHash := o.srv.cfgHash
+	srvState := o.srv.state
+	o.srv.mu.Unlock()
+	if srvState == StateRunning && srvHash != "" && srvHash != currentHash {
+		return true
+	}
+
+	o.cli.mu.Lock()
+	cliHash := o.cli.cfgHash
+	cliState := o.cli.state
+	o.cli.mu.Unlock()
+	if cliState == StateRunning && cliHash != "" && cliHash != currentHash {
+		return true
+	}
+
+	return false
 }

@@ -274,6 +274,7 @@ pre {
 .alert-info    { background: rgba(88,166,255,0.1); border: 1px solid rgba(88,166,255,0.3); }
 .alert-success { background: rgba(63,185,80,0.1); border: 1px solid rgba(63,185,80,0.3); }
 .alert-error   { background: rgba(248,81,73,0.1); border: 1px solid rgba(248,81,73,0.3); }
+.alert-warning { background: rgba(210,153,34,0.1); border: 1px solid rgba(210,153,34,0.3); }
 
 /* ── Utility ─────────────────────────────────────────────────────────── */
 .mt-16 { margin-top: 16px; }
@@ -281,6 +282,7 @@ pre {
 .mb-8 { margin-bottom: 8px; }
 .mb-16 { margin-bottom: 16px; }
 .flex { display: flex; }
+.flex-1 { flex: 1; }
 .gap-8 { gap: 8px; }
 .gap-16 { gap: 16px; }
 .items-center { align-items: center; }

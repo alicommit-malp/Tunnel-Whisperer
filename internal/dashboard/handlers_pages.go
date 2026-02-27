@@ -83,24 +83,26 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 	data := struct {
 		pageData
-		Config       *config.Config
-		ConfigPath   string
-		Relay        ops.RelayStatus
-		UserCount    int
-		OnlineCount  int
-		Users        []ops.UserInfo
-		ServerStatus ops.ServerStatus
-		ClientStatus ops.ClientStatus
+		Config        *config.Config
+		ConfigPath    string
+		Relay         ops.RelayStatus
+		UserCount     int
+		OnlineCount   int
+		Users         []ops.UserInfo
+		ServerStatus  ops.ServerStatus
+		ClientStatus  ops.ClientStatus
+		ConfigChanged bool
 	}{
-		pageData:     pageData{Title: "Status", Active: "index", Mode: mode},
-		Config:       cfg,
-		ConfigPath:   config.FilePath(),
-		Relay:        relay,
-		UserCount:    len(registered),
-		OnlineCount:  onlineCount,
-		Users:        registered,
-		ServerStatus: srvStatus,
-		ClientStatus: cliStatus,
+		pageData:      pageData{Title: "Status", Active: "index", Mode: mode},
+		Config:        cfg,
+		ConfigPath:    config.FilePath(),
+		Relay:         relay,
+		UserCount:     len(registered),
+		OnlineCount:   onlineCount,
+		Users:         registered,
+		ServerStatus:  srvStatus,
+		ClientStatus:  cliStatus,
+		ConfigChanged: s.ops.ConfigChanged(),
 	}
 	s.renderPage(w, "index", data)
 }
@@ -245,16 +247,21 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	cfgYAML, _ := yaml.Marshal(cfg)
 	mode := s.ops.Mode()
 
+	running := string(s.ops.ServerStatus().State) == "running" ||
+		string(s.ops.ClientStatus().State) == "running"
+
 	data := struct {
 		pageData
 		ConfigPath string
 		ConfigYAML string
 		Proxy      string
+		Running    bool
 	}{
 		pageData:   pageData{Title: "Config", Active: "config", Mode: mode},
 		ConfigPath: config.FilePath(),
 		ConfigYAML: string(cfgYAML),
 		Proxy:      cfg.Proxy,
+		Running:    running,
 	}
 	s.renderPage(w, "config", data)
 }

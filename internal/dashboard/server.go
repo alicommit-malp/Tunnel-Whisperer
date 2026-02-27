@@ -104,6 +104,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/relay/save-manual", s.apiSaveManualRelay)
 	s.mux.HandleFunc("/api/server/start", s.apiServerStart)
 	s.mux.HandleFunc("/api/server/stop", s.apiServerStop)
+	s.mux.HandleFunc("/api/server/restart", s.apiServerRestart)
 	s.mux.HandleFunc("/api/client/start", s.apiClientStart)
 	s.mux.HandleFunc("/api/client/stop", s.apiClientStop)
 	s.mux.HandleFunc("/api/client/upload", s.apiClientUpload)
